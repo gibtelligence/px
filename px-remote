@@ -28,10 +28,12 @@ for p in d["projects"]:
 raise SystemExit("agente desconocido: "+spec)
 ' "$spec")" || exit 1
 
-  # carpeta de transcripts de Claude Code para ese cwd
-  local mang dir
+  # Carpeta de transcripts para ese cwd. OJO: el $HOME de aqui NO es el de
+  # alla (miguel.berniz vs djzymba); la ruta remota se expande en el Studio.
+  local mang dir rel
   mang="$(python3 -c 'import sys;print("".join(c if (c.isalnum() and ord(c)<128) else "-" for c in sys.argv[1]))' "$cwd")"
-  dir="$HOME/.claude/projects/$mang"
+  rel=".claude/projects/$mang"
+  dir="$HOME/$rel"
 
   if [ -z "$uuid" ]; then   # sin id: la conversacion mas reciente de esa carpeta
     uuid="$(ls -t "$dir"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)"
@@ -41,8 +43,8 @@ raise SystemExit("agente desconocido: "+spec)
   [ -f "$src" ] || { echo "px: no existe $src" >&2; exit 1; }
 
   echo "  copiando  $(basename "$src")  ($(du -h "$src" | cut -f1)) -> $HOST"
-  ssh "$HOST" "mkdir -p '$dir'"
-  scp -q "$src" "$HOST:$dir/"
+  ssh "$HOST" "mkdir -p \"\$HOME/$rel\""
+  scp -q "$src" "$HOST:$rel/"      # relativo = home del usuario remoto
   exec ssh "$HOST" "~/.local/bin/px adopt '$spec' --session '$uuid'"
 }
 
