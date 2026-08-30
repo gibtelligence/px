@@ -123,11 +123,23 @@ final class PXTerminalView: LocalProcessTerminalView {
     }
 
     /// Deja solo las 50 pegadas mas recientes: esto es un buzon, no un archivo.
-    private static func prune(keep: Int = 50) {
+    /// Limpia los dos sitios (local y NAS) y se lleva tambien los sidecars
+    /// `._*` que el NAS crea junto a cada fichero.
+    static func prune(keep: Int = 50) {
+        for dir in [pasteDir, sharedDir] {
+            pruneDir(dir, keep: keep)
+        }
+    }
+
+    private static func pruneDir(_ dir: URL, keep: Int) {
         let fm = FileManager.default
         guard let items = try? fm.contentsOfDirectory(
-            at: pasteDir, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
-        let sorted = items.sorted {
+            at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
+        // sidecars del NAS: fuera siempre, no cuentan como pegadas
+        for it in items where it.lastPathComponent.hasPrefix("._") {
+            try? fm.removeItem(at: it)
+        }
+        let sorted = items.filter { !$0.lastPathComponent.hasPrefix("._") }.sorted {
             let a = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
             let b = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
             return a > b

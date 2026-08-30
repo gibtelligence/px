@@ -10,5 +10,8 @@
 .build/
 app/.build/
 
+# generado por build.sh desde px.py
+app/Sources/PX/Version.swift
+
 __pycache__/
 *.pyc

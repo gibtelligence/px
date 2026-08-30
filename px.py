@@ -22,7 +22,7 @@ import subprocess
 import sys
 import time
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"   # fuente unica: build.sh la inyecta en la app
 
 HOME = os.path.expanduser("~")
 ROOT = os.environ.get("PX_ROOT", "/Volumes/PERSONAL/Proyectos")

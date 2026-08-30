@@ -19,6 +19,10 @@ final class MainWindowController: NSObject {
         let button: TabButton
     }
     private var tabs: [Tab] = []
+    /// Proyectos plegados. Se recuerda entre arranques: plegar y que al volver
+    /// este otra vez todo abierto seria inutil.
+    private var collapsed: Set<String> = Set(
+        UserDefaults.standard.stringArray(forKey: "px.collapsedProjects") ?? [])
     private var activeIndex: Int? = nil
     private var refreshTimer: Timer?
 
@@ -147,8 +151,9 @@ final class MainWindowController: NSObject {
                 self.model = m
                 self.rebuildSidebar()
                 self.statusLabel.stringValue = m.map {
-                    "\($0.projects.count) proyectos · tmux en \(self.host.label)"
-                } ?? "px no responde en \(self.host.label)"
+                    let con = $0.projects.filter { !$0.agents.isEmpty }.count
+                    return "v\(PX_VERSION) · \(con) proyectos · tmux en \(self.host.label)"
+                } ?? "v\(PX_VERSION) · px no responde en \(self.host.label)"
             }
         }
     }
@@ -157,9 +162,13 @@ final class MainWindowController: NSObject {
         sidebar.arrangedSubviews.forEach { $0.removeFromSuperview() }
         guard let m = model else { return }
         for p in m.projects where !p.agents.isEmpty {
-            let header = GroupHeader(project: p)
+            let isCollapsed = collapsed.contains(p.name)
+            let header = GroupHeader(project: p, collapsed: isCollapsed) { [weak self] in
+                self?.toggle(project: p.name)
+            }
             sidebar.addArrangedSubview(header)
             header.widthAnchor.constraint(equalTo: sidebar.widthAnchor).isActive = true
+            if isCollapsed { continue }
             for a in p.agents {
                 let row = AgentRow(project: p, agent: a, isOpen: isOpen(p, a)) { [weak self] in
                     self?.openAgent(project: p, agent: a)
@@ -168,6 +177,20 @@ final class MainWindowController: NSObject {
                 row.widthAnchor.constraint(equalTo: sidebar.widthAnchor).isActive = true
             }
         }
+    }
+
+    private func toggle(project: String) {
+        if collapsed.contains(project) { collapsed.remove(project) }
+        else { collapsed.insert(project) }
+        UserDefaults.standard.set(Array(collapsed), forKey: "px.collapsedProjects")
+        rebuildSidebar()
+    }
+
+    /// Al abrir un agente, su proyecto se despliega: si no, la pestana nueva
+    /// aparece sin que se vea de donde sale.
+    private func expand(project: String) {
+        guard collapsed.remove(project) != nil else { return }
+        UserDefaults.standard.set(Array(collapsed), forKey: "px.collapsedProjects")
     }
 
     private func isOpen(_ p: Project, _ a: Agent) -> Bool {
@@ -195,6 +218,7 @@ final class MainWindowController: NSObject {
             self.closeTab(i)
         }
         tabs.append(tab)
+        expand(project: project.name)
         tabBar.addArrangedSubview(button)
         select(tabs.count - 1)
         rebuildSidebar()

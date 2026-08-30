@@ -1,34 +1,64 @@
 import AppKit
 
-/// Cabecera de grupo en la barra lateral = un proyecto.
+/// Cabecera de grupo en la barra lateral = un proyecto. Se pliega al pulsarla.
+///
+/// Al plegar NO se pierde la senal: la cabecera muestra los glifos de estado de
+/// los agentes abiertos, que es justo lo que uno no quiere dejar de ver.
 final class GroupHeader: NSView {
-    init(project: Project) {
+    private let onToggle: () -> Void
+
+    init(project: Project, collapsed: Bool, onToggle: @escaping () -> Void) {
+        self.onToggle = onToggle
         super.init(frame: .zero)
+
+        let arrow = NSTextField(labelWithString: collapsed ? "▸" : "▾")
+        arrow.font = .systemFont(ofSize: 10)
+        arrow.textColor = Theme.fg.withAlphaComponent(0.55)   // tiene que verse: es el mando
         let dot = NSTextField(labelWithString: "▌")
         dot.font = .systemFont(ofSize: 13)
         dot.textColor = Theme.projectColor(project.name)
         let name = NSTextField(labelWithString: project.name.uppercased())
         name.font = .systemFont(ofSize: 10, weight: .semibold)
         name.textColor = Theme.dim
-        let count = NSTextField(labelWithString: "\(project.agents.count)")
-        count.font = .systemFont(ofSize: 10)
-        count.textColor = Theme.line
 
-        for v in [dot, name, count] {
+        // Plegado: resumen de estados. Desplegado: cuantos agentes hay.
+        let abiertos = project.agents.filter { $0.state != .closed }
+        let right = NSTextField(labelWithString: "")
+        if collapsed && !abiertos.isEmpty {
+            let att = NSMutableAttributedString()
+            for a in abiertos.prefix(8) {
+                att.append(NSAttributedString(
+                    string: a.state.glyph + " ",
+                    attributes: [.foregroundColor: Theme.stateColor(a.state),
+                                 .font: NSFont.systemFont(ofSize: 10)]))
+            }
+            right.attributedStringValue = att
+        } else {
+            right.stringValue = "\(project.agents.count)"
+            right.font = .systemFont(ofSize: 10)
+            right.textColor = Theme.line
+        }
+
+        for v in [arrow, dot, name, right] {
             v.translatesAutoresizingMaskIntoConstraints = false
             addSubview(v)
         }
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: 30),
-            dot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            arrow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            arrow.centerYAnchor.constraint(equalTo: centerYAnchor),
+            dot.leadingAnchor.constraint(equalTo: arrow.trailingAnchor, constant: 2),
             dot.centerYAnchor.constraint(equalTo: centerYAnchor),
             name.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 4),
             name.centerYAnchor.constraint(equalTo: centerYAnchor),
-            count.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            count.centerYAnchor.constraint(equalTo: centerYAnchor),
+            right.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            right.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    override func mouseDown(with event: NSEvent) { onToggle() }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
 }
 
 /// Fila de agente: glifo de estado + nombre + ruta relativa.
