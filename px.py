@@ -29,7 +29,8 @@ ROOT = os.environ.get("PX_ROOT", "/Volumes/PERSONAL/Proyectos")
 CONF_DIR = os.environ.get("PX_CONF_DIR", os.path.join(HOME, ".config", "px"))
 PROJECTS_CONF = os.path.join(CONF_DIR, "projects.conf")
 CACHE_DIR = os.path.join(HOME, ".cache", "px")
-SESS_PREFIX = "px-"
+SESS_PREFIX = "px-"        # sesion del TUI: px-<proyecto>, una ventana por agente
+AGENT_SESS_PREFIX = "pxa-" # sesion por agente: pxa-<proyecto>-<agente> (app / px attach)
 CLAUDE_BIN = os.environ.get("PX_CLAUDE", "claude")
 
 MAX_DEPTH = 3
@@ -276,13 +277,21 @@ def sessions():
     return [s for s in out.split() if s.startswith(SESS_PREFIX)]
 
 
-def windows():
-    """[(sess, idx, name, cmd, path, activity)] de todas las sesiones px-."""
+def windows(agent_sessions=False):
+    """[(sess, idx, name, cmd, path, activity)] de todas las sesiones px-.
+
+    Con `agent_sessions` entran tambien las sesiones por-agente `pxa-*`
+    (las que crean la app nativa y `px attach`); por defecto quedan fuera
+    para no tocar a los consumidores del modelo del TUI (demonio,
+    window_exists)."""
     fmt = "#{session_name}\t#{window_index}\t#{window_name}\t#{pane_current_command}\t#{pane_current_path}\t#{window_activity}"
     rows = []
     for line in tmux("list-windows", "-a", "-F", fmt).splitlines():
         f = line.split("\t")
-        if len(f) == 6 and f[0].startswith(SESS_PREFIX):
+        if len(f) != 6:
+            continue
+        if f[0].startswith(SESS_PREFIX) or \
+                (agent_sessions and f[0].startswith(AGENT_SESS_PREFIX)):
             rows.append(f)
     return rows
 
@@ -495,17 +504,30 @@ def project_signal(p):
 # comandos
 # --------------------------------------------------------------------------
 def live_states():
-    """{('sess','name'): (estado, edad_en_seg)} de lo que hay abierto ahora."""
+    """{clave: (estado, edad_en_seg)} de lo que hay abierto ahora.
+
+    Dos claves segun el front-end: ('px-<proyecto>', ventana) para el TUI y
+    el nombre de sesion 'pxa-<proyecto>-<agente>' para la app y `px attach`.
+    Busca con `agent_state`, que resuelve ambas."""
     out = {}
     now = time.time()
-    for sess, idx, name, cmd, path, act in windows():
+    for sess, idx, name, cmd, path, act in windows(agent_sessions=True):
         st = classify(sess, idx, cmd)
         try:
             age = max(0, now - int(act))
         except ValueError:
             age = 0
-        out[(sess, name)] = (st, age)
+        key = sess if sess.startswith(AGENT_SESS_PREFIX) else (sess, name)
+        if key in out and (st == "off" or out[key][0] != "off"):
+            continue  # ya hay estado de otra ventana de esa sesion; mejor el vivo
+        out[key] = (st, age)
     return out
+
+
+def agent_state(live, project, agent):
+    """(estado, edad) del agente venga del TUI o de la app; None si cerrado."""
+    return (live.get((project.session, agent.name))
+            or live.get(session_name_for(project.name, agent.name)))
 
 
 def human_age(sec):
@@ -527,15 +549,15 @@ def cmd_ls(argv):
     print("")
     for p in ps:
         agents = p.agents
-        openn = sum(1 for a in agents if (p.session, a.name) in live)
+        openn = sum(1 for a in agents if agent_state(live, p, a))
         print("%s%s%s %s(%s)%s %s%d agentes%s%s" % (
             C["b"], p.name, C["x"], C["d"], p.path, C["x"],
             C["d"], len(agents), C["x"],
             "  %s%d abiertos%s" % (C["v"], openn, C["x"]) if openn else ""))
         for a in agents:
-            key = (p.session, a.name)
-            if key in live:
-                st, age = live[key]
+            hit = agent_state(live, p, a)
+            if hit:
+                st, age = hit
                 g, label, _, ansi = STATES[st]
                 extra = "" if st == "work" else "  %s%s%s" % (C["d"], human_age(age), C["x"])
                 print("  %s%s%s %-16s %s%-12s%s%s   %s%s%s" % (
@@ -752,9 +774,9 @@ def cmd_brief(argv):
                     h, when, subj = l.split("|", 2)
                     print("      %s%s · %s%s  %s" % (C["d"], h, when, C["x"], subj[:62]))
         for a in agents:
-            key = (p.session, a.name)
-            if key in live:
-                st, age = live[key]
+            hit = agent_state(live, p, a)
+            if hit:
+                st, age = hit
                 g, lab, _, ansi = STATES[st]
                 moved = True
                 print("  %s%s %-14s %s%s  %s%s%s" % (ansi, g, a.name, lab, C["x"],
@@ -786,7 +808,7 @@ def cmd_json(argv):
     for p in projects():
         pj = {"name": p.name, "path": p.path, "session": p.session, "agents": []}
         for a in p.agents:
-            st, age = live.get((p.session, a.name), (None, None))
+            st, age = agent_state(live, p, a) or (None, None)
             pj["agents"].append({
                 "name": a.name, "relpath": a.relpath, "path": a.path,
                 "brief": bool(a.brief),
@@ -912,10 +934,10 @@ def live_agents(deep=None):
         if key in seen:
             continue
         proj = agent = None
-        if sess.startswith("pxa-"):
+        if sess.startswith(AGENT_SESS_PREFIX):
             # pxa-<proyecto>-<agente>: el proyecto no lleva guiones (es un slug
             # de carpeta), asi que el primer guion tras el prefijo separa.
-            rest = sess[4:]
+            rest = sess[len(AGENT_SESS_PREFIX):]
             if "-" in rest:
                 proj, agent = rest.split("-", 1)
         if proj is None and deep:
@@ -1025,9 +1047,13 @@ def take_pin(session):
         return None
 
 
-def session_name(ag):
+def session_name_for(project_name, agent_name):
     clean = lambda s: s.replace(".", "_").replace(":", "_")
-    return "pxa-%s-%s" % (clean(ag.project.name), clean(ag.name))
+    return AGENT_SESS_PREFIX + "%s-%s" % (clean(project_name), clean(agent_name))
+
+
+def session_name(ag):
+    return session_name_for(ag.project.name, ag.name)
 
 
 def cmd_attach(argv):
