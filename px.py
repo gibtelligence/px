@@ -1310,10 +1310,15 @@ def cmd_doctor(argv):
     print("  %sprojects.conf%s  %s%s" % (C["d"], C["x"], PROJECTS_CONF,
           "" if os.path.isfile(PROJECTS_CONF) else "  %s(no existe)%s" % (C["y"], C["x"])))
     ps = projects()
-    print("  %sproyectos%s      %d  (%s)" % (C["d"], C["x"], len(ps),
-                                             ", ".join(p.name for p in ps) or "ninguno"))
+    con = [p for p in ps if p.agents]
+    print("  %sproyectos%s      %d  (%d con agentes, que son los que pinta la app)"
+          % (C["d"], C["x"], len(ps), len(con)))
     for p in ps:
-        print("      %-16s %d agentes" % (p.name, len(p.agents)))
+        if p.agents:
+            print("      %-16s %d agentes" % (p.name, len(p.agents)))
+        else:
+            print("      %-16s %ssin agentes (ningun CLAUDE.md) -> px onboard %s%s"
+                  % (p.name, C["y"], p.name, C["x"]))
     print("  %stmux server%s    %s" % (C["d"], C["x"],
           "vivo, sesiones: %s" % ", ".join(sessions()) if has_server() else "parado"))
     print("")
