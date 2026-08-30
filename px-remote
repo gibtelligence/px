@@ -48,7 +48,22 @@ raise SystemExit("agente desconocido: "+spec)
   exec ssh "$HOST" "~/.local/bin/px adopt '$spec' --session '$uuid'"
 }
 
+# Resuelve el repo (este fichero suele ser un symlink al NAS)
+SELF="${BASH_SOURCE[0]}"; while [ -L "$SELF" ]; do SELF="$(readlink "$SELF")"; done
+REPO="$(cd -- "$(dirname -- "$SELF")" && pwd)"
+
 case "${1:-attach}" in
+  update)
+      # NO se reenvia: actualizar el portatil es justo lo que no puede hacer
+      # el Studio (no tiene ssh de vuelta). Actualiza aqui y, de paso, alli.
+      shift
+      echo "  ── $(hostname -s) ──"
+      python3 "$REPO/px.py" update || exit $?
+      if [ "${1:-}" != "--solo-aqui" ]; then
+        echo "  ── $HOST ──"
+        ssh "$HOST" "~/.local/bin/px update"
+      fi
+      ;;
   handoff)
       shift; spec="${1:-}"; shift || true
       uuid=""; [ "${1:-}" = "--session" ] && { uuid="${2:-}"; }

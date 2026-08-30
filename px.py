@@ -1286,6 +1286,72 @@ def cmd_onboard(argv):
     return 1 if bad else 0
 
 
+def cmd_update(argv):
+    """Pone al dia ESTA maquina: repo, instalacion y app si hace falta.
+
+    WHY: el Studio no puede entrar al MacBook (Remote Login apagado, y la
+    relacion es a proposito unidireccional). Asi que actualizar el portatil
+    tiene que ser un comando corto que se lance alli, no una receta larga.
+    """
+    repo = os.path.dirname(os.path.abspath(__file__))
+    print("\n%spx update%s %s(%s)%s" % (C["b"], C["x"], C["d"], repo, C["x"]))
+
+    # 1. repo
+    if os.path.isdir(os.path.join(repo, ".git")):
+        before = run(["git", "-C", repo, "rev-parse", "--short", "HEAD"], 30).strip()
+        out = run(["git", "-C", repo, "pull", "--ff-only"], 120)
+        after = run(["git", "-C", repo, "rev-parse", "--short", "HEAD"], 30).strip()
+        if before and after and before != after:
+            print("  %sactualizado%s  %s -> %s" % (C["g"], C["x"], before, after))
+        else:
+            print("  %sal dia%s       %s" % (C["d"], C["x"], after or "(sin git)"))
+        if "diverg" in out or "Automatic merge failed" in out:
+            print("  %sojo: el repo local diverge; resuelvelo a mano%s" % (C["y"], C["x"]))
+
+    # 2. instalacion (px, demonio si toca)
+    inst = os.path.join(repo, "install.sh")
+    if os.path.isfile(inst):
+        for line in run(["bash", inst], 120).splitlines():
+            if line.strip():
+                print("  " + line.strip())
+
+    # 3. app: recompilar solo si hay fuentes mas nuevas que el binario
+    app = os.path.join(repo, "app")
+    binp = os.path.expanduser("~/Applications/PX.app/Contents/MacOS/PX")
+    if os.path.isdir(app):
+        newest = 0.0
+        for d, _, fs in os.walk(os.path.join(app, "Sources")):
+            for f in fs:
+                try:
+                    newest = max(newest, os.path.getmtime(os.path.join(d, f)))
+                except OSError:
+                    pass
+        for extra in ("Package.swift", "Resources/Info.plist"):
+            try:
+                newest = max(newest, os.path.getmtime(os.path.join(app, extra)))
+            except OSError:
+                pass
+        have = os.path.getmtime(binp) if os.path.isfile(binp) else 0.0
+        if not shutil_which("swift"):
+            print("  %sapp: swift no esta instalado, no se compila%s" % (C["y"], C["x"]))
+        elif newest > have:
+            print("  %scompilando la app%s %s(fuentes mas nuevas que el binario)%s"
+                  % (C["v"], C["x"], C["d"], C["x"]))
+            out = run(["bash", os.path.join(app, "build.sh")], 900)
+            err = [l for l in out.splitlines() if "error:" in l]
+            if err:
+                print("  %sFALLO al compilar:%s" % (C["r"], C["x"]))
+                for l in err[:5]:
+                    print("    " + l.strip())
+                return 1
+            print("  %sapp compilada%s  %s" % (C["g"], C["x"],
+                  "reinicia PX para usarla (los agentes siguen vivos en tmux)"))
+        else:
+            print("  %sapp al dia%s" % (C["d"], C["x"]))
+    print("")
+    return 0
+
+
 def cmd_theme(argv):
     """Re-aplica estilo y atajos (util tras tocar los formatos)."""
     ss = sessions()
@@ -1343,6 +1409,7 @@ px — terminal de proyectos y agentes
   px sessions             que hay vivo y que se restauraria tras un corte
   px restore [-y]         recrea las sesiones perdidas (claude --continue)
   px theme                re-aplica estilo y atajos a lo que ya este abierto
+  px update               pone al dia esta maquina (repo + px + app)
   px doctor               comprueba el entorno
   px daemon               refresca estados (lo arranca 'px open' solo)
 
@@ -1361,6 +1428,7 @@ def main(argv):
              "scan": cmd_scan, "doctor": cmd_doctor, "theme": cmd_theme,
              "json": cmd_json, "attach": cmd_attach, "sessions": cmd_sessions,
              "restore": cmd_restore, "adopt": cmd_adopt, "onboard": cmd_onboard,
+             "update": cmd_update,
              "daemon": lambda a: daemon(once="--once" in a)}
     if cmd in ("-h", "--help", "help"):
         print(USAGE)
