@@ -154,6 +154,11 @@ def projects():
         if os.path.isdir(path) and name not in seen:
             seen.add(name)
             out.append(Project(name, os.path.realpath(path)))
+    # el propio utillaje es un proyecto mas: ahi vive el agente maestro
+    tool = os.path.join(ROOT, "_px")
+    if "px" not in seen and os.path.isfile(os.path.join(tool, ".px.conf")):
+        seen.add("px")
+        out.append(Project("px", os.path.realpath(tool)))
     if os.path.isdir(ROOT):
         for entry in sorted(os.listdir(ROOT)):
             if entry.startswith((".", "_", "#", "@")) or entry in SKIP:
@@ -961,6 +966,70 @@ def occupant(cwd):
     return None
 
 
+PIN_DIR = os.path.join(STATE_DIR, "pins")
+
+
+def pin_path(session):
+    return os.path.join(PIN_DIR, session + ".json")
+
+
+def cmd_adopt(argv):
+    """Marca que la PROXIMA apertura de un agente reanude una conversacion dada.
+
+    Sirve para mudar una sesion que nacio fuera de px (p.ej. en Ghostty) sin
+    perder el hilo: `--continue` no vale porque coge la mas reciente de esa
+    carpeta, que puede ser otra. Aqui se fija el id exacto.
+
+    El transcript tiene que estar YA en esta maquina (la del tmux); para
+    traerlo desde otra, `px handoff` lo copia antes.
+    """
+    uuid = None
+    for i, a in enumerate(argv):
+        if a in ("--session", "-s") and i + 1 < len(argv):
+            uuid = argv[i + 1]
+    specs = [a for a in argv if not a.startswith("-") and a != uuid]
+    if not specs or not uuid:
+        die("uso: px adopt <proyecto>/<agente> --session <uuid>")
+    ag = resolve(specs[0])
+    tdir = os.path.join(CLAUDE_PROJECTS, mangle(ag.path))
+    tfile = os.path.join(tdir, uuid + ".jsonl")
+    if not os.path.isfile(tfile):
+        die("no encuentro el transcript en esta maquina:\n    %s\n"
+            "    (desde el otro Mac: px handoff %s --session %s)"
+            % (tfile, ag.spec, uuid))
+    session = session_name(ag)
+    if tmux_ok("has-session", "-t", "=" + session):
+        die("'%s' ya esta abierto: cierralo antes de adoptar otra conversacion\n"
+            "    tmux kill-session -t %s" % (ag.spec, session))
+    atomic_write(pin_path(session), json.dumps({"session_id": uuid,
+                                                "agent": ag.spec,
+                                                "at": time.time()}))
+    size = os.path.getsize(tfile)
+    print("\n  %sadoptada%s  %s" % (C["g"], C["x"], ag.spec))
+    print("  %stranscript %s (%.1f MB)%s" % (C["d"], uuid[:8], size / 1e6, C["x"]))
+    print("\n  Al abrir esa pestana en PX arrancara con --resume, no de cero.")
+    print("  %sCierra antes la sesion de origen: dos claude sobre el mismo"
+          "\n  transcript se pisan.%s\n" % (C["y"], C["x"]))
+    return 0
+
+
+def take_pin(session):
+    """Lee y CONSUME el pin (de un solo uso)."""
+    p = pin_path(session)
+    try:
+        with open(p, encoding="utf-8") as fh:
+            doc = json.load(fh)
+        os.unlink(p)
+        return doc.get("session_id")
+    except (IOError, ValueError):
+        return None
+
+
+def session_name(ag):
+    clean = lambda s: s.replace(".", "_").replace(":", "_")
+    return "pxa-%s-%s" % (clean(ag.project.name), clean(ag.name))
+
+
 def cmd_attach(argv):
     """Abre (o engancha) el agente en su sesion. Es lo que ejecuta la app.
 
@@ -973,10 +1042,11 @@ def cmd_attach(argv):
     if not specs:
         die("dime que agente enganchar")
     ag = resolve(specs[0])
-    session = "pxa-%s-%s" % (ag.project.name.replace(".", "_"),
-                             ag.name.replace(".", "_"))
+    session = session_name(ag)
 
+    pinned = None
     if not tmux_ok("has-session", "-t", "=" + session):
+        pinned = take_pin(session)
         other = occupant(ag.path)
         if other:
             sys.stderr.write(
@@ -987,7 +1057,10 @@ def cmd_attach(argv):
                 "        tmux attach -t %s\n\n"
                 % (ag.relpath, other["session"], other["cmd"], other["session"]))
             return 3
-    cmd = [CLAUDE_BIN] + (["--continue"] if resume else [])
+    if pinned:
+        cmd = [CLAUDE_BIN, "--resume", pinned]
+    else:
+        cmd = [CLAUDE_BIN] + (["--continue"] if resume else [])
     os.execvp("tmux", ["tmux", "new-session", "-A", "-s", session,
                        "-c", ag.path] + cmd)
 
@@ -1055,7 +1128,7 @@ def cmd_restore(argv):
                   % (C["y"], C["x"], r["project"], r["agent"]))
             continue
         session = "pxa-%s-%s" % (r["project"].replace(".", "_"),
-                                 r["agent"].replace(".", "_"))
+                                 r["agent"].replace(".", "_"))  # noqa
         tmux("new-session", "-d", "-s", session, "-c", r["cwd"],
              CLAUDE_BIN, "--continue")
         print("  %srestaurado%s %s/%s -> %s" % (C["g"], C["x"], r["project"],
@@ -1063,6 +1136,128 @@ def cmd_restore(argv):
         done += 1
     print("\n  %d sesion(es) recreadas. Abre PX y las veras.\n" % done)
     return 0
+
+
+def cmd_onboard(argv):
+    """Analiza un proyecto para darlo de alta en px, y valida lo ya dado.
+
+    Hace la parte mecanica (que carpetas son candidatas, colisiones de nombre,
+    git, agentes sin brief, dos agentes compartiendo carpeta). El criterio
+    -que es un agente, como se llama, que dice su brief- lo pone el maestro.
+    """
+    apply = "--apply" in argv
+    args = [a for a in argv if not a.startswith("-")]
+    if not args:
+        die("uso: px onboard <ruta-o-proyecto> [--apply]")
+    target = args[0]
+    p = project(target)
+    path = p.path if p else os.path.realpath(os.path.expanduser(target))
+    if not os.path.isdir(path):
+        die("no existe: %s" % path)
+    name = p.name if p else slug(os.path.basename(path))
+
+    print("\n%sAlta en px:%s %s%s%s\n  %s%s%s\n" % (
+        C["b"], C["x"], C["v"], name, C["x"], C["d"], path, C["x"]))
+
+    ok, warn, bad = [], [], []
+
+    # --- ubicacion ---------------------------------------------------------
+    if os.path.dirname(path) == os.path.realpath(ROOT):
+        ok.append("cuelga de PX_ROOT: se descubre solo")
+    else:
+        warn.append("esta FUERA de %s -> hay que registrarlo en %s"
+                    % (ROOT, PROJECTS_CONF))
+
+    # --- agentes -----------------------------------------------------------
+    conf = os.path.join(path, ".px.conf")
+    tmp = Project(name, path)
+    scanned = scan_agents(tmp)
+    # OJO: si hay .px.conf, la verdad son los agentes DECLARADOS (con los
+    # nombres de Miguel). Usar los descubiertos daba falsos "sin brief".
+    found = discover_agents(tmp) if os.path.isfile(os.path.join(path, ".px.conf")) else scanned
+    if os.path.isfile(conf):
+        ok.append(".px.conf presente (%d agentes declarados)" % len(read_conf(conf)))
+    elif found:
+        (ok if apply else warn).append(
+            "sin .px.conf; %d carpeta(s) con CLAUDE.md detectada(s)%s"
+            % (len(found), " -> se genera" if apply else " -> px onboard %s --apply" % name))
+    else:
+        bad.append("ninguna carpeta con CLAUDE.md: sin agentes no hay nada que abrir")
+
+    print("  %sAgentes detectados%s" % (C["b"], C["x"]))
+    if found:
+        for a in found:
+            b = " %sbrief%s" % (C["v"], C["x"]) if a.brief else ""
+            print("    %-16s %s%s%s%s" % (a.name, C["d"], a.relpath, C["x"], b))
+    else:
+        print("    %s(ninguno)%s" % (C["d"], C["x"]))
+
+    # --- candidatas sin CLAUDE.md -----------------------------------------
+    known = {a.relpath for a in found}
+    sin_declarar = [a.relpath for a in scanned if a.relpath not in known]
+    if sin_declarar:
+        warn.append("con CLAUDE.md pero fuera del .px.conf: %s"
+                    % ", ".join(sin_declarar))
+    cands = []
+    for e in sorted(os.listdir(path)):
+        if e.startswith((".", "_", "@", "#")) or e in SKIP:
+            continue
+        d = os.path.join(path, e)
+        if os.path.isdir(d) and e not in known:
+            has_git = os.path.exists(os.path.join(d, ".git"))
+            if has_git:
+                cands.append((e, "repo git sin CLAUDE.md"))
+    if cands:
+        print("\n  %sCandidatas a agente%s %s(les falta CLAUDE.md)%s"
+              % (C["b"], C["x"], C["d"], C["x"]))
+        for e, why in cands:
+            print("    %-16s %s%s%s" % (e, C["d"], why, C["x"]))
+        warn.append("%d repo(s) sin CLAUDE.md: decide si son agentes" % len(cands))
+
+    # --- colisiones y carpetas compartidas --------------------------------
+    names, paths = {}, {}
+    for a in found:
+        names.setdefault(a.name, []).append(a.relpath)
+        paths.setdefault(real(a.path), []).append(a.name)
+    for n, rs in names.items():
+        if len(rs) > 1:
+            bad.append("nombre repetido '%s': %s" % (n, ", ".join(rs)))
+    for pth, ns in paths.items():
+        if len(ns) > 1:
+            bad.append("misma carpeta para %s: dos agentes ahi se pisan" % ", ".join(ns))
+
+    # --- git ---------------------------------------------------------------
+    roots = []
+    for a in found:
+        r = git_root(a.path)
+        if r and r not in roots:
+            roots.append(r)
+    safe = run(["git", "config", "--global", "--get-all", "safe.directory"], 15).split("\n")
+    for r in roots:
+        if r.startswith("/Volumes/") and r not in safe:
+            warn.append("git: %s en disco de red sin safe.directory" % os.path.basename(r))
+    if roots:
+        ok.append("%d repo(s) git: %s" % (len(roots), ", ".join(os.path.basename(r) for r in roots)))
+
+    # --- briefs ------------------------------------------------------------
+    sin = [a.name for a in found if not a.brief]
+    if sin:
+        warn.append("sin brief de arranque: %s  (-> %s/.px/briefs/<agente>.md)"
+                    % (", ".join(sin), name))
+
+    # --- aplicar -----------------------------------------------------------
+    if apply and found and not os.path.isfile(conf):
+        cmd_scan([name] if p else [])
+        ok.append("escrito %s" % conf)
+
+    for label, rows, col in (("OK", ok, C["g"]), ("REVISAR", warn, C["y"]),
+                             ("BLOQUEA", bad, C["r"])):
+        if rows:
+            print("\n  %s%s%s" % (col, label, C["x"]))
+            for r in rows:
+                print("    %s %s" % ("·", r))
+    print("")
+    return 1 if bad else 0
 
 
 def cmd_theme(argv):
@@ -1112,6 +1307,10 @@ px — terminal de proyectos y agentes
   px close <agente>...    cierra la pestana
   px brief [desde]        que se ha movido en cada proyecto  (px brief 3.days)
   px scan [proyecto]      (re)genera el .px.conf del proyecto
+  px onboard <ruta>       analiza y valida un proyecto para darlo de alta
+  px adopt <ag> -s <id>   la proxima apertura reanuda ESA conversacion
+  px sessions             que hay vivo y que se restauraria tras un corte
+  px restore [-y]         recrea las sesiones perdidas (claude --continue)
   px theme                re-aplica estilo y atajos a lo que ya este abierto
   px doctor               comprueba el entorno
   px daemon               refresca estados (lo arranca 'px open' solo)
@@ -1130,7 +1329,7 @@ def main(argv):
              "a": cmd_tui_attach, "brief": cmd_brief, "b": cmd_brief,
              "scan": cmd_scan, "doctor": cmd_doctor, "theme": cmd_theme,
              "json": cmd_json, "attach": cmd_attach, "sessions": cmd_sessions,
-             "restore": cmd_restore,
+             "restore": cmd_restore, "adopt": cmd_adopt, "onboard": cmd_onboard,
              "daemon": lambda a: daemon(once="--once" in a)}
     if cmd in ("-h", "--help", "help"):
         print(USAGE)

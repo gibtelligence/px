@@ -3,10 +3,55 @@
 #   px            -> engancha a la sesion (o lista si no hay nada)
 #   px open coder -> abre alli esa pestana y engancha
 #   px ls|brief   -> solo lectura, no necesitan TTY
+#
+#   px handoff <proyecto>/<agente> [--session <uuid>]
+#       Muda a px una conversacion que nacio en ESTA maquina (p.ej. en Ghostty):
+#       copia su transcript al Studio y deja marcado que la proxima apertura de
+#       esa pestana reanude ESA conversacion, no la mas reciente de la carpeta.
 set -euo pipefail
 HOST="${PX_HOST:-studio}"
+
+handoff() {
+  local spec="${1:-}" uuid="${2:-}"
+  [ -n "$spec" ] || { echo "uso: px handoff <proyecto>/<agente> [--session <uuid>]" >&2; exit 2; }
+
+  # cwd del agente, segun el propio px del Studio (unica fuente de verdad)
+  local cwd
+  cwd="$(ssh "$HOST" "~/.local/bin/px json" | python3 -c '
+import json,sys
+spec=sys.argv[1]; proj,_,ag=spec.partition("/")
+d=json.load(sys.stdin)
+for p in d["projects"]:
+    if ag and p["name"]!=proj: continue
+    for a in p["agents"]:
+        if a["name"]==(ag or proj): print(a["path"]); raise SystemExit
+raise SystemExit("agente desconocido: "+spec)
+' "$spec")" || exit 1
+
+  # carpeta de transcripts de Claude Code para ese cwd
+  local mang dir
+  mang="$(python3 -c 'import sys;print("".join(c if (c.isalnum() and ord(c)<128) else "-" for c in sys.argv[1]))' "$cwd")"
+  dir="$HOME/.claude/projects/$mang"
+
+  if [ -z "$uuid" ]; then   # sin id: la conversacion mas reciente de esa carpeta
+    uuid="$(ls -t "$dir"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)"
+    [ -n "$uuid" ] || { echo "px: no hay ninguna conversacion en $dir" >&2; exit 1; }
+  fi
+  local src="$dir/$uuid.jsonl"
+  [ -f "$src" ] || { echo "px: no existe $src" >&2; exit 1; }
+
+  echo "  copiando  $(basename "$src")  ($(du -h "$src" | cut -f1)) -> $HOST"
+  ssh "$HOST" "mkdir -p '$dir'"
+  scp -q "$src" "$HOST:$dir/"
+  exec ssh "$HOST" "~/.local/bin/px adopt '$spec' --session '$uuid'"
+}
+
 case "${1:-attach}" in
-  ls|list|brief|b|doctor|scan|-h|--help|help|-V|--version)
+  handoff)
+      shift; spec="${1:-}"; shift || true
+      uuid=""; [ "${1:-}" = "--session" ] && { uuid="${2:-}"; }
+      handoff "$spec" "$uuid" ;;
+  ls|list|brief|b|doctor|scan|sessions|restore|json|-h|--help|help|-V|--version)
       exec ssh "$HOST" "~/.local/bin/px $*" ;;
   *)  exec ssh "$HOST" -t "~/.local/bin/px $*" ;;   # attach/open piden TTY
 esac
