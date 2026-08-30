@@ -43,10 +43,31 @@ final class PXTerminalView: LocalProcessTerminalView {
         super.paste(sender)
     }
 
-    /// Sube el fichero al host del agente y devuelve su ruta alli.
-    /// Devuelve nil (y se usa la local) si no hay nada que subir o falla.
+    /// Carpeta que ven LAS DOS maquinas. El NAS esta montado en la misma ruta
+    /// en ambas, asi que una imagen escrita aqui es legible por el agente sin
+    /// copiarla por la red.
+    static let sharedDir = URL(fileURLWithPath: "/Volumes/PERSONAL/.px-pastes")
+
+    /// Ruta que el agente REMOTO puede leer.
+    ///
+    /// WHY: Claude Code lee el portapapeles de SU maquina. Con PX en el MacBook
+    /// y el agente en el Studio, pegar leia el portapapeles del Studio — que no
+    /// es el tuyo. Hay que hacer llegar el fichero al otro lado.
+    /// Primera opcion el NAS (montado en ambas, sin red de por medio); si no
+    /// esta, scp.
     private func remotePath(for local: String) -> String? {
         guard case .ssh(let h) = host else { return nil }
+
+        if FileManager.default.fileExists(atPath: "/Volumes/PERSONAL") {
+            let fm = FileManager.default
+            try? fm.createDirectory(at: PXTerminalView.sharedDir, withIntermediateDirectories: true)
+            let dst = PXTerminalView.sharedDir
+                .appendingPathComponent((local as NSString).lastPathComponent)
+            try? fm.removeItem(at: dst)
+            if (try? fm.copyItem(at: URL(fileURLWithPath: local), to: dst)) != nil {
+                return dst.path
+            }
+        }
         let name = (local as NSString).lastPathComponent
         let rel = ".local/state/px/pastes"
         let mk = Process()
