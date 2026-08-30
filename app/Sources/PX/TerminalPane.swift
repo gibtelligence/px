@@ -14,7 +14,7 @@ import SwiftTerm
 final class TerminalPane: NSView {
     let agent: Agent
     let project: Project
-    private let term: LocalProcessTerminalView
+    private let term: PXTerminalView
     private(set) var started = false
 
     static func sessionName(project: Project, agent: Agent) -> String {
@@ -26,7 +26,7 @@ final class TerminalPane: NSView {
     init(project: Project, agent: Agent, host: Host) {
         self.project = project
         self.agent = agent
-        self.term = LocalProcessTerminalView(frame: .zero)
+        self.term = PXTerminalView(frame: .zero)
         super.init(frame: .zero)
 
         term.translatesAutoresizingMaskIntoConstraints = false
@@ -37,6 +37,7 @@ final class TerminalPane: NSView {
             term.topAnchor.constraint(equalTo: topAnchor),
             term.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+        term.host = host
         applyTheme()
         start(host: host)
     }
