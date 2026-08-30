@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# px — lanzador local (la maquina donde vive tmux: el Studio).
+# El cerebro esta en px.py; esto solo arregla el PATH y delega.
+#
+# Una invocacion tipo `ssh studio 'px ...'` NO lee ~/.zshrc, asi que el PATH
+# llega pelado: lo completamos aqui para que funcione igual por ssh que en
+# un Terminal del Studio. (Mismo truco que el `gib` original.)
+set -uo pipefail
+for d in /opt/homebrew/bin /usr/local/bin "$HOME/.local/bin"; do
+  case ":$PATH:" in *":$d:"*) ;; *) [ -d "$d" ] && PATH="$d:$PATH" ;; esac
+done
+export PATH
+
+SELF="${BASH_SOURCE[0]}"
+while [ -L "$SELF" ]; do SELF="$(readlink "$SELF")"; done
+HERE="$(cd -- "$(dirname -- "$SELF")" && pwd)"
+export PX_BIN="${PX_BIN:-$HOME/.local/bin/px}"
+
+PY="$(command -v python3 || true)"
+[ -n "$PY" ] || { echo "px: python3 no esta en el PATH" >&2; exit 1; }
+exec "$PY" "$HERE/px.py" "$@"

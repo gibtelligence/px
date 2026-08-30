@@ -1,0 +1,14 @@
+# Copias de la migracion: contienen ~/.claude.json y el .env del signal-worker
+# (credenciales). Se quedan en disco, NUNCA en git.
+.migracion-backup/
+
+# Metadatos del NAS y de macOS
+._*
+.DS_Store
+
+# Compilacion de Swift (el scratch real va a ~/.cache/px-build)
+.build/
+app/.build/
+
+__pycache__/
+*.pyc

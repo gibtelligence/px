@@ -1,0 +1,7 @@
+# Proyectos de px —  <nombre>  <ruta>
+#
+# Normalmente VACIO: desde la migracion (2026-08-30) todos los proyectos viven
+# bajo PX_ROOT=/Volumes/PERSONAL/Proyectos y px los descubre solo.
+#
+# Usa este fichero SOLO para proyectos que vivan fuera de esa raiz, p.ej.:
+#   sanitas   /Users/djzymba/Coding Projects/Sanitas-CRM

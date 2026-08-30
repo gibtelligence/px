@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# px (MacBook) — reenvia al Studio, que es donde vive el trabajo y el tmux.
+#   px            -> engancha a la sesion (o lista si no hay nada)
+#   px open coder -> abre alli esa pestana y engancha
+#   px ls|brief   -> solo lectura, no necesitan TTY
+set -euo pipefail
+HOST="${PX_HOST:-studio}"
+case "${1:-attach}" in
+  ls|list|brief|b|doctor|scan|-h|--help|help|-V|--version)
+      exec ssh "$HOST" "~/.local/bin/px $*" ;;
+  *)  exec ssh "$HOST" -t "~/.local/bin/px $*" ;;   # attach/open piden TTY
+esac

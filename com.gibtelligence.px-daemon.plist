@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.gibtelligence.px-daemon</string>
+    <!-- Mantiene fresco el registro anticorte (~/.local/state/px/state.json).
+         Sin esto, el registro solo se actualiza cuando alguien lanza px a mano,
+         y tras un apagon podria estar viejo. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PXBIN__</string>
+        <string>daemon</string>
+    </array>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><true/>
+    <key>ThrottleInterval</key><integer>10</integer>
+    <key>StandardOutPath</key><string>/tmp/px-daemon.log</string>
+    <key>StandardErrorPath</key><string>/tmp/px-daemon.log</string>
+</dict>
+</plist>
