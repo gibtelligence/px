@@ -798,7 +798,7 @@ def launch(sess, wname):
     tmux("send-keys", "-t", "=%s:%s" % (sess, wname), CLAUDE_BIN, "C-m")
 
 
-def wait_ready(target, timeout=180.0):
+def wait_ready(target, timeout=180.0, estable=3, intervalo=0.5):
     """Espera a que la TUI de claude este en el prompt libre.
 
     OJO con dos cosas que costaron un rato:
@@ -809,19 +809,28 @@ def wait_ready(target, timeout=180.0):
       dialogo de confianza y ahi se queda hasta que responde una PERSONA. Con
       un plazo corto se perdia el brief justo en el estreno de cada proyecto,
       que es cuando mas falta hace.
+    - Se exige idle ESTABLE (`estable` lecturas seguidas) y no una sola: al
+      aceptar la confianza la TUI se repinta, y un frame transitorio se
+      clasificaba como "listo". El pegado aterrizaba en mitad del repintado y
+      se perdia sin dejar rastro.
     """
     t0 = time.time()
+    seguidas = 0
     while time.time() - t0 < timeout:
         cmd = tmux("display", "-p", "-t", target, "#{pane_current_command}").strip()
         if not cmd:
             return False                      # el panel ya no existe
         if classify_target(target, cmd) == "idle":
-            return True
-        time.sleep(0.5)
+            seguidas += 1
+            if seguidas >= estable:
+                return True
+        else:
+            seguidas = 0
+        time.sleep(intervalo)
     return False
 
 
-def paste_brief(target, path, send=False):
+def paste_brief(target, path, send=False, intentos=2):
     """Deja el brief PEGADO en el prompt, sin enviarlo (Miguel revisa y pulsa Enter).
 
     Va por buffer de tmux con pegado entre corchetes (-p): asi el texto
@@ -835,12 +844,26 @@ def paste_brief(target, path, send=False):
         return False
     if not text:
         return False
-    tmux("set-buffer", "-b", "pxbrief", text)
-    tmux("paste-buffer", "-b", "pxbrief", "-t", target, "-p", "-d")
-    if send:
-        time.sleep(0.4)
-        tmux("send-keys", "-t", target, "C-m")
-    return True
+
+    # Se COMPRUEBA que el brief aterrizo, no se supone: si la TUI estaba
+    # repintandose, paste-buffer no da error y el texto se pierde. Devolver
+    # exito sin mirar era mentir.
+    sonda = "".join(text.split())[:30]
+
+    for intento in range(intentos):
+        if intento:
+            tmux("send-keys", "-t", target, "C-u")   # limpia un pegado a medias
+            time.sleep(0.8)
+        tmux("set-buffer", "-b", "pxbrief", text)
+        tmux("paste-buffer", "-b", "pxbrief", "-t", target, "-p", "-d")
+        time.sleep(0.7)
+        pane = "".join(tmux("capture-pane", "-p", "-t", target, "-S", "-25").split())
+        if sonda and sonda in pane:
+            if send:
+                time.sleep(0.4)
+                tmux("send-keys", "-t", target, "C-m")
+            return True
+    return False
 
 
 def shutil_which(name):
@@ -1239,8 +1262,12 @@ def cmd_paste_brief(argv):
     # prefijo), pero como destino de PANEL tmux lo ignora y devuelve vacio:
     # `display -t "=sesion"` no da nada y `paste-buffer` falla en silencio.
     target = session_name(ag)
-    if wait_ready(target):
-        paste_brief(target, ag.brief, send=send)
+    if not wait_ready(target):
+        sys.stderr.write("px: el panel de %s no llego a un prompt estable\n" % ag.spec)
+        return 1
+    if not paste_brief(target, ag.brief, send=send):
+        sys.stderr.write("px: el brief de %s no llego a pegarse\n" % ag.spec)
+        return 1
     return 0
 
 
