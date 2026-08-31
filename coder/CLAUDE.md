@@ -30,3 +30,16 @@ todos sus consumidores (cmd_ls, cmd_json, cmd_brief, demonio, app).
 - El demonio y el registro anticorte viven en disco local (`~/.local/state/px`),
   nunca en el NAS: launchd no puede leer `/Volumes`.
 - Commit en este repo, con qué validaste y con qué comando.
+
+## Comunicación con el maestro
+
+El maestro trabaja SOBRE este utillaje mientras tú lo cambias por debajo: un
+cambio de comportamiento sin aviso le rompe una migración a medias (pasó con
+`px ws`: 5 proyectos "desaparecieron" del listado en plena alta). Por eso:
+
+- Cuando publiques algo que cambie comportamiento visible (CLI, app, formato
+  de conf), avísale con un mensaje entre sesiones a `pxa-px-maestro`
+  (una línea de resumen basta). Si su sesión no está abierta, que quede claro
+  en el mensaje de commit.
+- Él te mandará los hallazgos de campo (bugs vistos en uso real) por la misma
+  vía. Trátalos como partes de prueba en vivo: valen más que un issue.

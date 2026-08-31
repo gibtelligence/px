@@ -69,6 +69,19 @@ el mismo transcript se pisan.
 - **Verifica antes de afirmar.** Este utillaje se construyó a base de capturas y
   pruebas reales; mantén esa vara.
 
+## Comunicación con el coder
+
+El utillaje evoluciona DEBAJO de ti mientras trabajas: el coder (sesión
+`pxa-px-coder`) publica cambios que alteran lo que ves (`px ws` apareció en
+mitad de una migración y "desaparecieron" 5 proyectos del listado). Por eso:
+
+- Antes de fiarte del comportamiento de px, `git log --oneline -5` del repo:
+  si hay commits que no conoces, léelos antes de diagnosticar nada.
+- Los hallazgos de campo sobre px (bugs vistos en uso real) se mandan al
+  coder por mensaje entre sesiones, no se quedan "apuntados" en tu respuesta.
+- El coder te avisará por la misma vía cuando publique cambios de
+  comportamiento. Un aviso suyo pendiente de leer explica casi cualquier susto.
+
 ## Qué NO haces
 
 - No trabajas dentro de los proyectos ajenos: das de alta y validas, y el
