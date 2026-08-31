@@ -183,3 +183,66 @@ final class TabButton: NSView {
     }
     override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
 }
+
+
+/// Conmutador de entorno: separa el trabajo de empresa del personal.
+///
+/// Es global (lo guarda `px`, no la app), asi que la CLI y la app siempre
+/// coinciden en que entorno estas.
+final class WorkspaceBar: NSView {
+    init(workspaces: [Workspace], current: String, onPick: @escaping (String) -> Void) {
+        super.init(frame: .zero)
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.spacing = 4
+        row.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(row)
+
+        var items: [(String, NSColor)] = workspaces.map { ($0.name, $0.nsColor) }
+        items.append(("all", Theme.dim))
+        for (name, color) in items {
+            let on = (name == current)
+            let pill = PillButton(title: name, color: color, active: on) { onPick(name) }
+            row.addArrangedSubview(pill)
+        }
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 30),
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            row.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
+            row.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError() }
+}
+
+final class PillButton: NSView {
+    private let onClick: () -> Void
+    private let bg = CALayer()
+
+    init(title: String, color: NSColor, active: Bool, onClick: @escaping () -> Void) {
+        self.onClick = onClick
+        super.init(frame: .zero)
+        wantsLayer = true
+        bg.cornerRadius = 5
+        bg.backgroundColor = (active ? color.withAlphaComponent(0.22) : NSColor.clear).cgColor
+        bg.borderWidth = active ? 1 : 0
+        bg.borderColor = color.withAlphaComponent(0.8).cgColor
+        layer?.addSublayer(bg)
+
+        let label = NSTextField(labelWithString: title == "all" ? "todos" : title)
+        label.font = .systemFont(ofSize: 10, weight: active ? .semibold : .regular)
+        label.textColor = active ? color : Theme.dim
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 20),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override func layout() { super.layout(); bg.frame = bounds }
+    override func mouseDown(with event: NSEvent) { onClick() }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+}

@@ -28,6 +28,7 @@ HOME = os.path.expanduser("~")
 ROOT = os.environ.get("PX_ROOT", "/Volumes/PERSONAL/Proyectos")
 CONF_DIR = os.environ.get("PX_CONF_DIR", os.path.join(HOME, ".config", "px"))
 PROJECTS_CONF = os.path.join(CONF_DIR, "projects.conf")
+WS_CONF = os.path.join(CONF_DIR, "workspaces.conf")
 CACHE_DIR = os.path.join(HOME, ".cache", "px")
 SESS_PREFIX = "px-"        # sesion del TUI: px-<proyecto>, una ventana por agente
 AGENT_SESS_PREFIX = "pxa-" # sesion por agente: pxa-<proyecto>-<agente> (app / px attach)
@@ -145,6 +146,83 @@ def read_conf(path):
     except IOError:
         pass
     return rows
+
+
+# --------------------------------------------------------------------------
+# entornos de trabajo (empresa vs personal)
+# --------------------------------------------------------------------------
+def workspaces():
+    """[(nombre, color, [proyectos])] en el orden del fichero."""
+    out = []
+    try:
+        with open(WS_CONF, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split()
+                name, color, projs = parts[0], None, []
+                for tok in parts[1:]:
+                    if tok.startswith("color="):
+                        color = tok[6:]
+                    else:
+                        projs.append(tok)
+                out.append((name, color or VIOLET, projs))
+    except IOError:
+        pass
+    return out
+
+
+def ws_state_file():
+    return os.path.join(STATE_DIR, "workspace")
+
+
+def current_ws():
+    """Entorno activo. 'all' = sin filtro."""
+    env = os.environ.get("PX_WS")
+    if env:
+        return env
+    try:
+        with open(ws_state_file(), encoding="utf-8") as fh:
+            v = fh.read().strip()
+            return v or "all"
+    except IOError:
+        return "all"
+
+
+def ws_assigned():
+    """Proyectos que aparecen en ALGUN entorno."""
+    out = set()
+    for _n, _c, projs in workspaces():
+        out.update(projs)
+    return out
+
+
+def ws_projects(name=None):
+    """Proyectos visibles en un entorno, o None si no filtra.
+
+    REGLA (importante): un proyecto se oculta solo si esta asignado a algun
+    entorno y no a este. Lo que no esta asignado se ve SIEMPRE. Asi dar de alta
+    un proyecto nuevo nunca lo hace desaparecer sin avisar — el fallo es
+    hacia mostrar de mas, no hacia esconder.
+    """
+    name = name or current_ws()
+    if name == "all":
+        return None
+    for n, _c, projs in workspaces():
+        if n == name:
+            return set(projs) | ws_unassigned()
+    return None
+
+
+def ws_unassigned():
+    asig = ws_assigned()
+    return {p.name for p in projects() if p.name not in asig}
+
+
+def visible(ps, name=None):
+    allow = ws_projects(name)
+    return ps if allow is None else [p for p in ps if p.name in allow]
 
 
 def projects():
@@ -543,7 +621,7 @@ def human_age(sec):
 def cmd_ls(argv):
     only = argv[0] if argv else None
     live = live_states() if has_server() else {}
-    ps = projects()
+    ps = visible(projects())
     if only:
         ps = [p for p in ps if p.name == only] or die("proyecto desconocido: %s" % only)
     print("")
@@ -571,6 +649,12 @@ def cmd_ls(argv):
         print("")
     if not live:
         print("  %sNada abierto. Abre con: px open <agente>%s\n" % (C["d"], C["x"]))
+    o = others_summary()
+    if o:
+        bits = ["%s%s %d %s%s" % (STATES[k][3], STATES[k][0], v, STATES[k][1], C["x"])
+                for k, v in o.items()]
+        print("  %sfuera del entorno '%s':%s %s\n"
+              % (C["y"], current_ws(), C["x"], "  ".join(bits)))
     return 0
 
 
@@ -747,7 +831,7 @@ def cmd_brief(argv):
     since = argv[0] if argv else "24.hours.ago"
     live = live_states() if has_server() else {}
     print("\n%sBriefing%s %s· cambios desde %s%s" % (C["b"], C["x"], C["d"], since, C["x"]))
-    for p in projects():
+    for p in visible(projects()):
         agents = p.agents
         gitroots = []
         for a in agents:
@@ -801,11 +885,78 @@ def git_root(path):
     return out or None
 
 
+def others_summary(name=None):
+    """Agentes vivos FUERA del entorno activo.
+
+    WHY: filtrar no puede significar perder la senal. Si en el otro entorno hay
+    un agente esperandote, tienes que enterarte igual.
+    """
+    allow = ws_projects(name)
+    if allow is None:
+        return {}
+    live = live_states() if has_server() else {}
+    counts = {}
+    for p in projects():
+        if p.name in allow:
+            continue
+        for a in p.agents:
+            got = agent_state(live, p, a)
+            if got:
+                st = got[0]
+                counts[st] = counts.get(st, 0) + 1
+    return counts
+
+
+def cmd_ws(argv):
+    """Entornos de trabajo: ver el activo, o cambiarlo."""
+    wss = workspaces()
+    if not wss:
+        die("no hay entornos definidos: crea %s" % WS_CONF)
+    cur = current_ws()
+    if argv:
+        want = argv[0]
+        names = [n for n, _c, _p in wss]
+        if want != "all" and want not in names:
+            die("entorno desconocido: '%s' (hay: %s, all)" % (want, ", ".join(names)))
+        atomic_write(ws_state_file(), want)
+        cur = want
+        print("  %sentorno%s  %s" % (C["g"], C["x"], want))
+
+    print("")
+    for n, _c, projs in wss:
+        mark = "%s▌%s" % (C["v"], C["x"]) if n == cur else " "
+        vis = [p for p in projects() if p.name in projs]
+        ag = sum(len(p.agents) for p in vis)
+        print("  %s %-14s %s%d proyectos · %d agentes%s   %s%s%s"
+              % (mark, n, C["d"], len(vis), ag, C["x"],
+                 C["d"], " ".join(projs), C["x"]))
+    mark = "%s▌%s" % (C["v"], C["x"]) if cur == "all" else " "
+    print("  %s %-14s %ssin filtro%s" % (mark, "all", C["d"], C["x"]))
+    libres = sorted(ws_unassigned())
+    if libres:
+        print("\n  %ssin asignar (se ven en todos):%s %s"
+              % (C["d"], C["x"], " ".join(libres)))
+
+    o = others_summary()
+    if o:
+        bits = ["%s%s %d %s%s" % (STATES[k][3], STATES[k][0], v, STATES[k][1], C["x"])
+                for k, v in o.items()]
+        print("\n  %sfuera de '%s':%s %s" % (C["y"], cur, C["x"], "  ".join(bits)))
+    print("")
+    return 0
+
+
 def cmd_json(argv):
     """Modelo completo en JSON — lo consume la app nativa (app/)."""
     live = live_states() if has_server() else {}
-    out = {"root": ROOT, "session_prefix": SESS_PREFIX, "projects": []}
-    for p in projects():
+    cur = current_ws()
+    out = {"root": ROOT, "session_prefix": SESS_PREFIX,
+           "workspace": cur,
+           "workspaces": [{"name": n, "color": c, "projects": pr}
+                          for n, c, pr in workspaces()],
+           "others": others_summary(),
+           "projects": []}
+    for p in visible(projects()):
         pj = {"name": p.name, "path": p.path, "session": p.session, "agents": []}
         for a in p.agents:
             st, age = agent_state(live, p, a) or (None, None)
@@ -1371,7 +1522,9 @@ def cmd_doctor(argv):
     for name, path in rows:
         mark = "%s✔%s" % (C["g"], C["x"]) if path else "%s✘%s" % (C["r"], C["x"])
         print("  %s %-10s %s" % (mark, name, path or "NO ENCONTRADO"))
-    print("\n  %sPX_ROOT%s        %s%s" % (C["d"], C["x"], ROOT,
+    print("\n  %sentorno%s        %s%s" % (C["d"], C["x"], current_ws(),
+          "" if workspaces() else "  %s(sin %s)%s" % (C["y"], WS_CONF, C["x"])))
+    print("  %sPX_ROOT%s        %s%s" % (C["d"], C["x"], ROOT,
           "" if os.path.isdir(ROOT) else "  %s(no existe todavia)%s" % (C["y"], C["x"])))
     print("  %sprojects.conf%s  %s%s" % (C["d"], C["x"], PROJECTS_CONF,
           "" if os.path.isfile(PROJECTS_CONF) else "  %s(no existe)%s" % (C["y"], C["x"])))
@@ -1410,6 +1563,7 @@ px — terminal de proyectos y agentes
   px restore [-y]         recrea las sesiones perdidas (claude --continue)
   px theme                re-aplica estilo y atajos a lo que ya este abierto
   px update               pone al dia esta maquina (repo + px + app)
+  px ws [nombre|all]      entorno de trabajo activo (empresa vs personal)
   px doctor               comprueba el entorno
   px daemon               refresca estados (lo arranca 'px open' solo)
 
@@ -1428,7 +1582,7 @@ def main(argv):
              "scan": cmd_scan, "doctor": cmd_doctor, "theme": cmd_theme,
              "json": cmd_json, "attach": cmd_attach, "sessions": cmd_sessions,
              "restore": cmd_restore, "adopt": cmd_adopt, "onboard": cmd_onboard,
-             "update": cmd_update,
+             "update": cmd_update, "ws": cmd_ws, "entorno": cmd_ws,
              "daemon": lambda a: daemon(once="--once" in a)}
     if cmd in ("-h", "--help", "help"):
         print(USAGE)

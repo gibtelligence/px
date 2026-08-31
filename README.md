@@ -120,6 +120,40 @@ Dos cosas que condicionan el diseño, y que se descubrieron probando:
    nombre de la sesión (`pxa-<proyecto>-<agente>`) y el cwd es la cadena que da
    tmux. Nada de `stat` sobre disco de red.
 
+## Entornos de trabajo (empresa vs personal)
+
+Un conmutador global decide qué se ve. Vive en `px`, no en la app, así que la
+CLI y la GUI siempre coinciden.
+
+```bash
+px ws                  # entornos, cuál está activo y qué queda sin asignar
+px ws personal         # cambiar
+px ws all              # sin filtro
+```
+
+El reparto está en `~/.config/px/workspaces.conf`:
+
+```
+gibtelligence  color=#7C5CFF  px gibtelligence eez fluge sanitas sarastudio ftth
+personal       color=#54C07A  px tfg piano bitloom eso homelab logi
+```
+
+Tres decisiones que importan:
+
+1. **Lo no asignado se ve en todos los entornos.** Un proyecto se oculta solo si
+   está asignado a algún entorno y no a éste. Así dar de alta un proyecto nuevo
+   nunca lo hace desaparecer sin que te enteres: el fallo es hacia mostrar de
+   más, no hacia esconder.
+2. **Filtrar no es perder la señal.** Si en el otro entorno hay agentes vivos,
+   `px ls` y la barra lateral lo dicen (`fuera del entorno: ◐ 1`). Que un agente
+   te esté esperando no puede depender de en qué pestaña mental estés.
+3. **El color del entorno tiñe el título** de la app. Saber si estás en trabajo
+   de empresa o personal tiene que ser preatento, no algo que se lee.
+
+Cambiar de entorno **no toca las sesiones**: los agentes del otro entorno siguen
+vivos en tmux, simplemente no se pintan. `px restore` tampoco filtra — la
+recuperación tras un corte es global a propósito.
+
 ## Un solo agente por directorio
 
 Dos agentes en la misma carpeta se pisan los ficheros. `px attach` — que es lo

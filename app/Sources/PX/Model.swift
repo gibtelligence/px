@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// Donde vive el tmux que envolvemos: en esta maquina, o en otra por ssh.
@@ -112,10 +113,40 @@ struct Project: Decodable {
     let agents: [Agent]
 }
 
+struct Workspace: Decodable {
+    let name: String
+    let color: String
+    let projects: [String]
+
+    var nsColor: NSColor {
+        var h: UInt32 = 0
+        let hex = color.hasPrefix("#") ? String(color.dropFirst()) : color
+        Scanner(string: hex).scanHexInt32(&h)
+        return h == 0 ? Theme.violet : Theme.hex(h)
+    }
+}
+
 struct Model: Decodable {
     let root: String
     let session_prefix: String
     let projects: [Project]
+    let workspace: String?
+    let workspaces: [Workspace]?
+    /// estado -> cuantos agentes vivos hay FUERA del entorno activo
+    let others: [String: Int]?
+
+    /// Cambia el entorno activo (lo guarda px, para que CLI y app coincidan).
+    static func setWorkspace(_ name: String, host: Host = Host.current) {
+        let px = (host == .local) ? Host.binary("px") : "px"
+        let (exe, args) = host.command([px, "ws", name], tty: false)
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: exe)
+        p.arguments = args
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        try? p.run()
+        p.waitUntilExit()
+    }
 
     /// Pide el modelo a `px json` (el cerebro sigue siendo python: la app no
     /// reimplementa descubrimiento ni estados).

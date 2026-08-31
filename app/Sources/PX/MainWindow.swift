@@ -11,6 +11,7 @@ final class MainWindowController: NSObject {
     private let tabBar = NSStackView()
     private let content = NSView()
     private let statusLabel = NSTextField(labelWithString: "")
+    private let titleLabel = NSTextField(labelWithString: "PX")
 
     private struct Tab {
         let project: Project
@@ -59,7 +60,7 @@ final class MainWindowController: NSObject {
         side.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(side)
 
-        let title = NSTextField(labelWithString: "PX")
+        let title = titleLabel
         title.font = .systemFont(ofSize: 15, weight: .bold)
         title.textColor = Theme.violet
         title.translatesAutoresizingMaskIntoConstraints = false
@@ -161,6 +162,42 @@ final class MainWindowController: NSObject {
     private func rebuildSidebar() {
         sidebar.arrangedSubviews.forEach { $0.removeFromSuperview() }
         guard let m = model else { return }
+
+        // conmutador de entorno arriba del todo
+        if let wss = m.workspaces, !wss.isEmpty {
+            let bar = WorkspaceBar(workspaces: wss, current: m.workspace ?? "all") { [weak self] name in
+                guard let self = self else { return }
+                DispatchQueue.global(qos: .userInitiated).async {
+                    Model.setWorkspace(name, host: self.host)
+                    DispatchQueue.main.async { self.reload() }
+                }
+            }
+            sidebar.addArrangedSubview(bar)
+            bar.widthAnchor.constraint(equalTo: sidebar.widthAnchor).isActive = true
+            // el color del entorno tine el titulo: saber donde estas de un vistazo
+            let cur = wss.first { $0.name == m.workspace }
+            titleLabel.textColor = cur?.nsColor ?? Theme.violet
+        }
+
+        // lo que queda FUERA del entorno: filtrar no puede ser perder la senal
+        if let o = m.others, !o.isEmpty {
+            let txt = o.map { "\(AgentState(rawValue: $0.key)?.glyph ?? "·") \($0.value)" }
+                       .sorted().joined(separator: "  ")
+            let warn = NSTextField(labelWithString: "fuera del entorno:  \(txt)")
+            warn.font = .systemFont(ofSize: 9)
+            warn.textColor = Theme.amber
+            let box = NSView()
+            warn.translatesAutoresizingMaskIntoConstraints = false
+            box.addSubview(warn)
+            NSLayoutConstraint.activate([
+                box.heightAnchor.constraint(equalToConstant: 22),
+                warn.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 14),
+                warn.centerYAnchor.constraint(equalTo: box.centerYAnchor),
+            ])
+            sidebar.addArrangedSubview(box)
+            box.widthAnchor.constraint(equalTo: sidebar.widthAnchor).isActive = true
+        }
+
         for p in m.projects where !p.agents.isEmpty {
             let isCollapsed = collapsed.contains(p.name)
             let header = GroupHeader(project: p, collapsed: isCollapsed) { [weak self] in
