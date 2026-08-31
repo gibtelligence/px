@@ -199,6 +199,20 @@ porque compara el `cwd` real de los paneles de tmux, no los nombres. Nota: no
 puede usar `lsof` sobre el proceso, porque en el NAS devuelve *Stale NFS file
 handle*.
 
+## Códigos de salida
+
+Para quien scripte contra `px` (el maestro, sobre todo):
+
+| Código | Significa |
+|--------|-----------|
+| `0` | hecho |
+| `1` | no se pudo hacer lo pedido (proyecto/agente desconocido, o **existe pero lo filtra el entorno** — el mensaje distingue los dos casos) |
+| `3` | `px attach` se negó: ya hay un agente en esa carpeta |
+| `130` | interrumpido (Ctrl-C) |
+
+Un proyecto filtrado por el entorno sale con `1` a propósito: pediste listarlo y
+no se listó. Salir con `0` sin mostrar nada sería mentir a un script.
+
 ## Instalación
 
 ```bash
