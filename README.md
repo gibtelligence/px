@@ -67,6 +67,15 @@ pestañas lanzó a dos agentes a trabajar sin supervisión (uno de ellos, el
 contable, sobre contabilidad real). Abrir una pestaña no puede significar eso.
 Con `px open -g` sí se envía, cuando tú lo decides.
 
+Funciona por los dos caminos: el TUI (`px open`) y la app, que va por
+`px attach`. Solo se pega **al crear** la sesión, nunca al reengancharse ni
+sobre un `--resume` (una conversación reanudada ya trae su contexto).
+
+Si la carpeta es nueva, claude abre primero el diálogo de confianza y ahí se
+queda hasta que responde una persona; el pegado espera hasta 3 minutos por eso.
+Con un plazo corto el brief se perdía justo en el estreno de cada proyecto, que
+es cuando más falta hace.
+
 Los briefs de `coder`, `contable` y `marca` salieron de `AGENTES.md`. Son
 ficheros vivos: mantenlos al día, porque un brief viejo manda a un agente a
 hacer trabajo ya hecho.

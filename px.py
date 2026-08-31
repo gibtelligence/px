@@ -427,17 +427,21 @@ def windows(agent_sessions=False):
     return rows
 
 
-def classify(sess, idx, cmd):
-    """Estado real del agente, leyendo el pane."""
+def classify_target(target, cmd):
+    """Estado real del agente leyendo ese panel de tmux."""
     if cmd not in CLAUDE_CMDS:
         return "off"
-    txt = tmux("capture-pane", "-p", "-t", "%s:%s" % (sess, idx), "-S", "-14")
+    txt = tmux("capture-pane", "-p", "-t", target, "-S", "-14")
     low = txt.lower()
     if MARK_WAIT in low:
         return "wait"
     if MARK_WORK in low:
         return "work"
     return "idle"
+
+
+def classify(sess, idx, cmd):
+    return classify_target("%s:%s" % (sess, idx), cmd)
 
 
 def tmux_set_window_opt(target, key, value):
@@ -773,8 +777,9 @@ def cmd_open(argv):
         for ag in nuevas:
             if not ag.brief:
                 continue
-            if wait_ready(ag.project.session, ag.name):
-                if paste_brief(ag.project.session, ag.name, ag.brief, send=send_brief):
+            tgt = "%s:%s" % (ag.project.session, ag.name)
+            if wait_ready(tgt):
+                if paste_brief(tgt, ag.brief, send=send_brief):
                     print("     %sbrief pegado%s en %s%s" % (
                         C["d"], C["x"], ag.name,
                         " y enviado" if send_brief else " (revisalo y pulsa Enter)"))
@@ -793,22 +798,30 @@ def launch(sess, wname):
     tmux("send-keys", "-t", "=%s:%s" % (sess, wname), CLAUDE_BIN, "C-m")
 
 
-def wait_ready(sess, wname, timeout=30.0):
-    """Espera a que la TUI de claude este en el prompt (no arrancando, no en dialogo)."""
+def wait_ready(target, timeout=180.0):
+    """Espera a que la TUI de claude este en el prompt libre.
+
+    OJO con dos cosas que costaron un rato:
+    - El target es un panel, no "sesion + ventana con el nombre del agente".
+      La app usa una sesion por agente y tmux nombra su ventana `claude.exe`,
+      asi que buscar una ventana llamada como el agente no encontraba nada.
+    - El plazo es largo a proposito: en una carpeta nueva, claude abre el
+      dialogo de confianza y ahi se queda hasta que responde una PERSONA. Con
+      un plazo corto se perdia el brief justo en el estreno de cada proyecto,
+      que es cuando mas falta hace.
+    """
     t0 = time.time()
     while time.time() - t0 < timeout:
-        idx = window_exists(sess, wname)
-        if idx is None:
-            return False
-        cmd = tmux("display", "-p", "-t", "=%s:%s" % (sess, wname),
-                   "#{pane_current_command}").strip()
-        if classify(sess, idx, cmd) == "idle":
+        cmd = tmux("display", "-p", "-t", target, "#{pane_current_command}").strip()
+        if not cmd:
+            return False                      # el panel ya no existe
+        if classify_target(target, cmd) == "idle":
             return True
         time.sleep(0.5)
     return False
 
 
-def paste_brief(sess, wname, path, send=False):
+def paste_brief(target, path, send=False):
     """Deja el brief PEGADO en el prompt, sin enviarlo (Miguel revisa y pulsa Enter).
 
     Va por buffer de tmux con pegado entre corchetes (-p): asi el texto
@@ -822,7 +835,6 @@ def paste_brief(sess, wname, path, send=False):
         return False
     if not text:
         return False
-    target = "=%s:%s" % (sess, wname)
     tmux("set-buffer", "-b", "pxbrief", text)
     tmux("paste-buffer", "-b", "pxbrief", "-t", target, "-p", "-d")
     if send:
@@ -1208,6 +1220,30 @@ def pin_path(session):
     return os.path.join(PIN_DIR, session + ".json")
 
 
+def cmd_paste_brief(argv):
+    """Espera a que la TUI este lista y pega el brief. Uso interno.
+
+    Existe como subcomando porque `px attach` acaba en execvp (se convierte en
+    el tmux de la pestana) y por tanto no tiene un "despues" donde esperar. Se
+    lanza en segundo plano: asi la pestana se ve al instante y el brief entra
+    cuando el prompt esta listo, en vez de dejar el panel en blanco 10s.
+    """
+    send = "--go" in argv or "-g" in argv
+    specs = [a for a in argv if not a.startswith("-")]
+    if not specs:
+        die("uso: px paste-brief <proyecto>/<agente> [--go]")
+    ag = resolve(specs[0])
+    if not ag.brief:
+        return 0
+    # OJO: sin el prefijo "=". Sirve para has-session (evita coincidencia por
+    # prefijo), pero como destino de PANEL tmux lo ignora y devuelve vacio:
+    # `display -t "=sesion"` no da nada y `paste-buffer` falla en silencio.
+    target = session_name(ag)
+    if wait_ready(target):
+        paste_brief(target, ag.brief, send=send)
+    return 0
+
+
 def cmd_adopt(argv):
     """Marca que la PROXIMA apertura de un agente reanude una conversacion dada.
 
@@ -1277,14 +1313,16 @@ def cmd_attach(argv):
     trabajando en la misma carpeta (p.ej. abierta a mano o desde otro sitio).
     """
     resume = "--continue" in argv or "-c" in argv
+    no_brief = "--no-brief" in argv or "-n" in argv
     specs = [a for a in argv if not a.startswith("-")]
     if not specs:
         die("dime que agente enganchar")
     ag = resolve(specs[0])
     session = session_name(ag)
 
-    pinned = None
+    pinned, nueva = None, False
     if not tmux_ok("has-session", "-t", "=" + session):
+        nueva = True
         pinned = take_pin(session)
         other = occupant(ag.path)
         if other:
@@ -1300,6 +1338,18 @@ def cmd_attach(argv):
         cmd = [CLAUDE_BIN, "--resume", pinned]
     else:
         cmd = [CLAUDE_BIN] + (["--continue"] if resume else [])
+
+    # Brief: solo al CREAR la sesion, y nunca sobre un --resume (una
+    # conversacion reanudada ya tiene su contexto; pegarle el brief encima
+    # seria ruido). Va en segundo plano porque abajo hacemos execvp.
+    if nueva and not pinned and not no_brief and ag.brief:
+        try:
+            subprocess.Popen([sys.executable, os.path.abspath(__file__),
+                              "paste-brief", ag.spec],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             stdin=subprocess.DEVNULL, start_new_session=True)
+        except Exception:
+            pass
     os.execvp("tmux", ["tmux", "new-session", "-A", "-s", session,
                        "-c", ag.path] + cmd)
 
@@ -1650,6 +1700,7 @@ def main(argv):
              "scan": cmd_scan, "doctor": cmd_doctor, "theme": cmd_theme,
              "json": cmd_json, "attach": cmd_attach, "sessions": cmd_sessions,
              "restore": cmd_restore, "adopt": cmd_adopt, "onboard": cmd_onboard,
+             "paste-brief": cmd_paste_brief,
              "update": cmd_update, "ws": cmd_ws, "entorno": cmd_ws,
              "order": cmd_order, "orden": cmd_order,
              "daemon": lambda a: daemon(once="--once" in a)}
