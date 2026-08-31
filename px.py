@@ -676,7 +676,16 @@ def cmd_ls(argv):
     live = live_states() if has_server() else {}
     ps = visible(projects())
     if only:
-        ps = [p for p in ps if p.name == only] or die("proyecto desconocido: %s" % only)
+        sel = [p for p in ps if p.name == only]
+        if not sel:
+            todos = {p.name for p in projects()}
+            if only in todos:
+                die("'%s' existe, pero esta fuera del entorno '%s'\n"
+                    "    px ws all            para verlo todo\n"
+                    "    px ws <entorno>      para cambiar de entorno"
+                    % (only, current_ws()))
+            die("proyecto desconocido: %s" % only)
+        ps = sel
     print("")
     for p in ps:
         agents = p.agents
@@ -1392,8 +1401,13 @@ def cmd_onboard(argv):
     ok, warn, bad = [], [], []
 
     # --- ubicacion ---------------------------------------------------------
+    registrado = any(os.path.realpath(os.path.expanduser(rp)) == path
+                     for _n, rp in read_conf(PROJECTS_CONF))
     if os.path.dirname(path) == os.path.realpath(ROOT):
         ok.append("cuelga de PX_ROOT: se descubre solo")
+    elif registrado:
+        ok.append("fuera de PX_ROOT pero ya registrado en %s"
+                  % os.path.basename(PROJECTS_CONF))
     else:
         warn.append("esta FUERA de %s -> hay que registrarlo en %s"
                     % (ROOT, PROJECTS_CONF))

@@ -53,12 +53,15 @@ final class TerminalPane: NSView {
     private func start(host: Host) {
         guard !started else { return }
         started = true
-        let session = TerminalPane.sessionName(project: project, agent: agent)
-        // -A: attach-or-create. El comando solo corre al CREARLA.
-        let local = (host == .local)
-        let tmux = local ? Host.binary("tmux") : "tmux"
-        let claude = local ? Host.binary("claude") : "claude"
-        let tmuxCmd = "\(tmux) new-session -A -s \(session) -c \(shq(agent.path)) \(claude)"
+        // Delegamos en `px attach`, que hace el attach-or-create Y ADEMAS:
+        //  - consume el pin de `px adopt` (si no, una conversacion adoptada se
+        //    abre en limpio en vez de con --resume);
+        //  - aplica el candado de un solo agente por directorio, incluso contra
+        //    sesiones abiertas fuera de px.
+        // Se construyo el tmux a pelo aqui una vez y se perdieron las dos cosas
+        // sin que nadie se enterara hasta verlo en campo. La logica vive en px.
+        let px = (host == .local) ? Host.binary("px") : "px"
+        let tmuxCmd = "\(px) attach \(shq(project.name + "/" + agent.name))"
         let (exe, args) = host.command([tmuxCmd])
         var env = Terminal.getEnvironmentVariables(termName: "xterm-256color")
         env.append("PX_AGENT=\(agent.name)")

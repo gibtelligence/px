@@ -46,9 +46,25 @@ enum Host: Equatable {
         return name
     }
 
+    /// Variables PX_* de esta app, para que los paneles vivan en el MISMO
+    /// universo que la ventana.
+    ///
+    /// WHY: el terminal se arranca con un entorno propio (no hereda el del
+    /// proceso), asi que `px attach` dentro del panel usaba la config por
+    /// defecto aunque la app corriera con PX_ROOT/PX_CONF_DIR distintos. En
+    /// produccion coincide por casualidad; en cuanto se cambia algo, no.
+    static var envExports: String {
+        let keep = ["PX_ROOT", "PX_CONF_DIR", "PX_STATE_DIR", "PX_WS", "PX_CLAUDE"]
+        let env = ProcessInfo.processInfo.environment
+        return keep.compactMap { k -> String? in
+            guard let v = env[k], !v.isEmpty else { return nil }
+            return "\(k)='\(v.replacingOccurrences(of: "'", with: "'\\''"))'"
+        }.map { "export \($0); " }.joined()
+    }
+
     /// Ejecutable + argumentos para correr un comando en el host.
     func command(_ argv: [String], tty: Bool = true) -> (String, [String]) {
-        let line = argv.joined(separator: " ")
+        let line = Host.envExports + argv.joined(separator: " ")
         switch self {
         case .local:
             // PATH explicito: homebrew + ~/.local/bin, que es donde viven px,
