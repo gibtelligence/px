@@ -150,8 +150,15 @@ Tres decisiones que importan:
 3. **El color del entorno tiñe el título** de la app. Saber si estás en trabajo
    de empresa o personal tiene que ser preatento, no algo que se lee.
 
+El filtro alcanza también a **las pestañas de arriba**, no solo a la barra
+lateral: si cambias de entorno, las pestañas del otro desaparecen y, si la
+activa era una de ellas, se pasa a la primera visible. A la derecha se indica
+cuántas quedan escondidas (`2 en otro entorno`) — esconder en silencio sería
+justo el fallo que este diseño evita.
+
 Cambiar de entorno **no toca las sesiones**: los agentes del otro entorno siguen
-vivos en tmux, simplemente no se pintan. `px restore` tampoco filtra — la
+vivos en tmux, simplemente no se pintan. Ocultar una pestaña no es cerrarla: al
+volver, reaparece donde estaba. `px restore` tampoco filtra — la
 recuperación tras un corte es global a propósito.
 
 ## Un solo agente por directorio

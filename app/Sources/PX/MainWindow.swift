@@ -12,6 +12,7 @@ final class MainWindowController: NSObject {
     private let content = NSView()
     private let statusLabel = NSTextField(labelWithString: "")
     private let titleLabel = NSTextField(labelWithString: "PX")
+    private let hiddenLabel = NSTextField(labelWithString: "")
 
     private struct Tab {
         let project: Project
@@ -100,6 +101,13 @@ final class MainWindowController: NSObject {
         tabBar.translatesAutoresizingMaskIntoConstraints = false
         tabStrip.addSubview(tabBar)
 
+        // pestanas que existen pero el entorno esconde: se dice, no se ocultan
+        // en silencio
+        hiddenLabel.font = .systemFont(ofSize: 10)
+        hiddenLabel.textColor = Theme.dim
+        hiddenLabel.translatesAutoresizingMaskIntoConstraints = false
+        tabStrip.addSubview(hiddenLabel)
+
         content.wantsLayer = true
         content.layer?.backgroundColor = Theme.terminalBG.cgColor
         content.translatesAutoresizingMaskIntoConstraints = false
@@ -134,6 +142,8 @@ final class MainWindowController: NSObject {
             tabBar.leadingAnchor.constraint(equalTo: tabStrip.leadingAnchor),
             tabBar.trailingAnchor.constraint(lessThanOrEqualTo: tabStrip.trailingAnchor),
             tabBar.centerYAnchor.constraint(equalTo: tabStrip.centerYAnchor),
+            hiddenLabel.trailingAnchor.constraint(equalTo: tabStrip.trailingAnchor, constant: -14),
+            hiddenLabel.centerYAnchor.constraint(equalTo: tabStrip.centerYAnchor),
 
             content.leadingAnchor.constraint(equalTo: side.trailingAnchor),
             content.trailingAnchor.constraint(equalTo: root.trailingAnchor),
@@ -151,6 +161,7 @@ final class MainWindowController: NSObject {
                 guard let self = self else { return }
                 self.model = m
                 self.rebuildSidebar()
+                self.refreshTabBar()
                 self.statusLabel.stringValue = m.map {
                     let con = $0.projects.filter { !$0.agents.isEmpty }.count
                     return "v\(PX_VERSION) · \(con) proyectos · tmux en \(self.host.label)"
@@ -216,6 +227,34 @@ final class MainWindowController: NSObject {
         }
     }
 
+    /// Las pestanas tambien obedecen al entorno.
+    ///
+    /// Ocultar NO es cerrar: el pane y su sesion de tmux siguen vivos, y al
+    /// volver al entorno la pestana reaparece donde estaba. Si la activa queda
+    /// fuera, se pasa a la primera visible.
+    private func refreshTabBar() {
+        guard let m = model else { return }
+        let visibles = Set(m.projects.map { $0.name })
+        tabBar.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        for t in tabs where visibles.contains(t.project.name) {
+            tabBar.addArrangedSubview(t.button)
+        }
+        let ocultas = tabs.filter { !visibles.contains($0.project.name) }.count
+        hiddenLabel.stringValue = ocultas > 0
+            ? "\(ocultas) en otro entorno" : ""
+
+        if let i = activeIndex, !visibles.contains(tabs[i].project.name) {
+            if let j = tabs.firstIndex(where: { visibles.contains($0.project.name) }) {
+                select(j)
+            } else {
+                content.subviews.forEach { $0.removeFromSuperview() }
+                activeIndex = nil
+                window.title = "PX"
+                tabs.forEach { $0.button.setActive(false) }
+            }
+        }
+    }
+
     private func toggle(project: String) {
         if collapsed.contains(project) { collapsed.remove(project) }
         else { collapsed.insert(project) }
@@ -259,6 +298,7 @@ final class MainWindowController: NSObject {
         tabBar.addArrangedSubview(button)
         select(tabs.count - 1)
         rebuildSidebar()
+        refreshTabBar()
     }
 
     private func select(_ i: Int) {

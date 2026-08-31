@@ -32,10 +32,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func openFromCommandLine() {
         let a = CommandLine.arguments
         guard let i = a.firstIndex(of: "--open"), i + 1 < a.count else { return }
-        let spec = a[i + 1]
+        let specs = a[i + 1].split(separator: ",").map(String.init)
         // el modelo se carga en segundo plano: esperamos a tenerlo
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
-            self?.main.open(spec: spec)
+        for (n, spec) in specs.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2 + Double(n) * 1.5) { [weak self] in
+                self?.main.open(spec: spec)
+            }
         }
     }
 
