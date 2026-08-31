@@ -13,6 +13,7 @@ final class MainWindowController: NSObject {
     private let statusLabel = NSTextField(labelWithString: "")
     private let titleLabel = NSTextField(labelWithString: "PX")
     private let hiddenLabel = NSTextField(labelWithString: "")
+    private let dropView = SidebarDropView()
 
     private struct Tab {
         let project: Project
@@ -81,7 +82,7 @@ final class MainWindowController: NSObject {
         sidebarScroll.drawsBackground = false
         sidebarScroll.hasVerticalScroller = true
         sidebarScroll.translatesAutoresizingMaskIntoConstraints = false
-        let flipped = FlippedView()
+        let flipped = dropView
         flipped.translatesAutoresizingMaskIntoConstraints = false
         flipped.addSubview(sidebar)
         sidebarScroll.documentView = flipped
@@ -172,6 +173,8 @@ final class MainWindowController: NSObject {
 
     private func rebuildSidebar() {
         sidebar.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        dropView.headers = []
+        dropView.onReorder = { [weak self] name, idx in self?.reorder(name, to: idx) }
         guard let m = model else { return }
 
         // conmutador de entorno arriba del todo
@@ -216,6 +219,7 @@ final class MainWindowController: NSObject {
             }
             sidebar.addArrangedSubview(header)
             header.widthAnchor.constraint(equalTo: sidebar.widthAnchor).isActive = true
+            dropView.headers.append((name: p.name, view: header))
             if isCollapsed { continue }
             for a in p.agents {
                 let row = AgentRow(project: p, agent: a, isOpen: isOpen(p, a)) { [weak self] in
@@ -252,6 +256,25 @@ final class MainWindowController: NSObject {
                 window.title = "PX"
                 tabs.forEach { $0.button.setActive(false) }
             }
+        }
+    }
+
+    /// Gancho de prueba: mismo camino que soltar, sin raton.
+    func testReorder(_ name: String, to idx: Int) { reorder(name, to: idx) }
+
+    /// Reordena arrastrando. Se manda solo lo visible: px lo fusiona con el
+    /// orden global y respeta el de los proyectos del otro entorno.
+    private func reorder(_ name: String, to idx: Int) {
+        guard let m = model else { return }
+        var names = m.projects.filter { !$0.agents.isEmpty }.map { $0.name }
+        guard let from = names.firstIndex(of: name) else { return }
+        names.remove(at: from)
+        let to = min(max(idx > from ? idx - 1 : idx, 0), names.count)
+        names.insert(name, at: to)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            Model.order(names, host: self.host)
+            DispatchQueue.main.async { self.reload() }
         }
     }
 
@@ -349,6 +372,4 @@ final class MainWindowController: NSObject {
     func prevTab() { if let i = activeIndex { select((i - 1 + tabs.count) % max(tabs.count, 1)) } }
 }
 
-final class FlippedView: NSView {
-    override var isFlipped: Bool { true }
-}
+

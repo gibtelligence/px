@@ -4,11 +4,15 @@ import AppKit
 ///
 /// Al plegar NO se pierde la senal: la cabecera muestra los glifos de estado de
 /// los agentes abiertos, que es justo lo que uno no quiere dejar de ver.
-final class GroupHeader: NSView {
+final class GroupHeader: NSView, NSDraggingSource {
     private let onToggle: () -> Void
+    let projectName: String
+    private var mouseDownAt: NSPoint = .zero
+    private var dragging = false
 
     init(project: Project, collapsed: Bool, onToggle: @escaping () -> Void) {
         self.onToggle = onToggle
+        self.projectName = project.name
         super.init(frame: .zero)
 
         let arrow = NSTextField(labelWithString: collapsed ? "▸" : "▾")
@@ -57,7 +61,47 @@ final class GroupHeader: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    override func mouseDown(with event: NSEvent) { onToggle() }
+    // Pulsar pliega; arrastrar reordena. Se distingue por el umbral de
+    // movimiento, y el pliegue se decide al SOLTAR: si no, arrastrar plegaria
+    // el grupo de paso.
+    override func mouseDown(with event: NSEvent) {
+        mouseDownAt = event.locationInWindow
+        dragging = false
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard !dragging else { return }
+        let d = hypot(event.locationInWindow.x - mouseDownAt.x,
+                      event.locationInWindow.y - mouseDownAt.y)
+        guard d > 4 else { return }
+        dragging = true
+
+        let item = NSPasteboardItem()
+        item.setString(projectName, forType: .pxProject)
+        let di = NSDraggingItem(pasteboardWriter: item)
+        di.setDraggingFrame(bounds, contents: snapshot())
+        beginDraggingSession(with: [di], event: event, source: self)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        if !dragging { onToggle() }
+        dragging = false
+    }
+
+    private func snapshot() -> NSImage {
+        let img = NSImage(size: bounds.size)
+        if let rep = bitmapImageRepForCachingDisplay(in: bounds) {
+            cacheDisplay(in: bounds, to: rep)
+            img.addRepresentation(rep)
+        }
+        return img
+    }
+
+    func draggingSession(_ s: NSDraggingSession,
+                         sourceOperationMaskFor ctx: NSDraggingContext) -> NSDragOperation {
+        .move
+    }
+
     override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
 }
 

@@ -29,6 +29,7 @@ ROOT = os.environ.get("PX_ROOT", "/Volumes/PERSONAL/Proyectos")
 CONF_DIR = os.environ.get("PX_CONF_DIR", os.path.join(HOME, ".config", "px"))
 PROJECTS_CONF = os.path.join(CONF_DIR, "projects.conf")
 WS_CONF = os.path.join(CONF_DIR, "workspaces.conf")
+ORDER_CONF = os.path.join(CONF_DIR, "order.conf")
 CACHE_DIR = os.path.join(HOME, ".cache", "px")
 SESS_PREFIX = "px-"        # sesion del TUI: px-<proyecto>, una ventana por agente
 AGENT_SESS_PREFIX = "pxa-" # sesion por agente: pxa-<proyecto>-<agente> (app / px attach)
@@ -250,7 +251,59 @@ def projects():
                 continue
             seen.add(name)
             out.append(Project(name, os.path.realpath(path)))
-    return out
+    return apply_order(out)
+
+
+def read_order():
+    """Orden manual de proyectos (uno por linea). Lo escribe la app al
+    arrastrar; vive en la config y no en la app para que `px ls` y la barra
+    lateral no se contradigan."""
+    try:
+        with open(ORDER_CONF, encoding="utf-8") as fh:
+            return [l.strip() for l in fh
+                    if l.strip() and not l.startswith("#")]
+    except IOError:
+        return []
+
+
+def apply_order(ps):
+    """Ordena por la lista manual; lo no listado va detras, en su orden."""
+    order = read_order()
+    if not order:
+        return ps
+    idx = {n: i for i, n in enumerate(order)}
+    return sorted(ps, key=lambda p: (idx.get(p.name, len(idx)),))
+
+
+def cmd_order(argv):
+    """px order <proyecto> [proyecto...]  — fija el orden. Sin argumentos, lo muestra."""
+    if not argv:
+        cur = read_order()
+        print("\n  %sorden actual%s  %s" % (C["d"], C["x"],
+              " ".join(cur) if cur else "(alfabetico)"))
+        print("  %s%s%s\n" % (C["d"], ORDER_CONF, C["x"]))
+        return 0
+    todos = [p.name for p in projects()]          # ya en el orden vigente
+    desconocidos = [a for a in argv if a not in set(todos)]
+    if desconocidos:
+        die("proyecto(s) que no existen: %s" % ", ".join(desconocidos))
+
+    # FUSION, no reemplazo: la app solo ve los proyectos del entorno activo,
+    # asi que reescribir la lista entera con lo que ella ve borraria el orden
+    # de los demas. Los nombres recibidos ocupan las MISMAS posiciones que ya
+    # ocupaban entre ellos, en el nuevo orden relativo; el resto no se mueve.
+    nuevo = list(todos)
+    dados = set(argv)
+    huecos = [i for i, n in enumerate(nuevo) if n in dados]
+    for hueco, nombre in zip(huecos, argv):
+        nuevo[hueco] = nombre
+
+    atomic_write(ORDER_CONF,
+                 "# Orden de los proyectos. Lo escribe la app al arrastrar;\n"
+                 "# editable a mano. Lo que no aparezca va detras.\n"
+                 + "\n".join(nuevo) + "\n")
+    print("  %sorden%s  %s" % (C["g"], C["x"], " ".join(nuevo)))
+    return 0
 
 
 def project(name):
@@ -1564,6 +1617,7 @@ px — terminal de proyectos y agentes
   px theme                re-aplica estilo y atajos a lo que ya este abierto
   px update               pone al dia esta maquina (repo + px + app)
   px ws [nombre|all]      entorno de trabajo activo (empresa vs personal)
+  px order [p1 p2 ...]    orden de los proyectos (la app lo escribe al arrastrar)
   px doctor               comprueba el entorno
   px daemon               refresca estados (lo arranca 'px open' solo)
 
@@ -1583,6 +1637,7 @@ def main(argv):
              "json": cmd_json, "attach": cmd_attach, "sessions": cmd_sessions,
              "restore": cmd_restore, "adopt": cmd_adopt, "onboard": cmd_onboard,
              "update": cmd_update, "ws": cmd_ws, "entorno": cmd_ws,
+             "order": cmd_order, "orden": cmd_order,
              "daemon": lambda a: daemon(once="--once" in a)}
     if cmd in ("-h", "--help", "help"):
         print(USAGE)

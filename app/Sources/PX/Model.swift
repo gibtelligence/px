@@ -148,6 +148,21 @@ struct Model: Decodable {
         p.waitUntilExit()
     }
 
+    /// Fija el orden de los proyectos. px lo FUSIONA con el orden global, asi
+    /// que mandar solo los visibles del entorno no borra el resto.
+    static func order(_ names: [String], host: Host = Host.current) {
+        guard !names.isEmpty else { return }
+        let px = (host == .local) ? Host.binary("px") : "px"
+        let (exe, args) = host.command([px, "order"] + names, tty: false)
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: exe)
+        p.arguments = args
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        try? p.run()
+        p.waitUntilExit()
+    }
+
     /// Pide el modelo a `px json` (el cerebro sigue siendo python: la app no
     /// reimplementa descubrimiento ni estados).
     static func load(host: Host = Host.current) -> Model? {

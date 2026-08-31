@@ -22,6 +22,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         main = MainWindowController()
         buildMenu()
+        // PX --test-reorder <proyecto>:<indice>   (mismo camino que soltar)
+        if let i = CommandLine.arguments.firstIndex(of: "--test-reorder"),
+           i + 1 < CommandLine.arguments.count {
+            let parts = CommandLine.arguments[i + 1].split(separator: ":")
+            if parts.count == 2, let idx = Int(parts[1]) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                    self?.main.testReorder(String(parts[0]), to: idx)
+                }
+            }
+        }
         main.window.makeKeyAndOrderFront(nil)
         openFromCommandLine()
         NSApp.activate(ignoringOtherApps: true)

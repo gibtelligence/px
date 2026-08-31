@@ -161,6 +161,26 @@ vivos en tmux, simplemente no se pintan. Ocultar una pestaña no es cerrarla: al
 volver, reaparece donde estaba. `px restore` tampoco filtra — la
 recuperación tras un corte es global a propósito.
 
+## Ordenar los proyectos
+
+Arrastra la cabecera de un proyecto en la barra lateral. Una línea violeta marca
+dónde caerá. Pulsar pliega, arrastrar reordena: se distingue por el umbral de
+movimiento, y el pliegue se decide al **soltar**, para que arrastrar no pliegue
+el grupo de paso.
+
+El orden vive en `~/.config/px/order.conf`, no en la app, así que `px ls` y la
+barra lateral no se contradicen. Editable a mano, o:
+
+```bash
+px order                       # ver el orden actual
+px order gibtelligence eez px  # fijarlo
+```
+
+**`px order` fusiona, no reemplaza.** La app solo ve los proyectos del entorno
+activo; si reescribiera la lista entera con lo que ve, borraría el orden de los
+del otro entorno. Los nombres recibidos ocupan las mismas posiciones que ya
+ocupaban entre ellos, en el nuevo orden relativo, y el resto no se mueve.
+
 ## Un solo agente por directorio
 
 Dos agentes en la misma carpeta se pisan los ficheros. `px attach` — que es lo
