@@ -30,6 +30,7 @@ CONF_DIR = os.environ.get("PX_CONF_DIR", os.path.join(HOME, ".config", "px"))
 PROJECTS_CONF = os.path.join(CONF_DIR, "projects.conf")
 WS_CONF = os.path.join(CONF_DIR, "workspaces.conf")
 ORDER_CONF = os.path.join(CONF_DIR, "order.conf")
+COLORS_CONF = os.path.join(CONF_DIR, "colors.conf")
 CACHE_DIR = os.path.join(HOME, ".cache", "px")
 SESS_PREFIX = "px-"        # sesion del TUI: px-<proyecto>, una ventana por agente
 AGENT_SESS_PREFIX = "pxa-" # sesion por agente: pxa-<proyecto>-<agente> (app / px attach)
@@ -286,26 +287,39 @@ def projects():
 
 
 def project_colors(ps):
-    """{proyecto: '#hex'} estable y sin colisiones mientras alcance la paleta.
+    """{proyecto: '#hex'}: overrides, memoria persistida, y recien asignados.
 
-    Primero los overrides (`color=#hex` en el .px.conf de cada proyecto);
-    el resto, en orden alfabetico (estable ante reordenaciones), toma el hueco
-    que le da su hash y, si esta cogido, sondea al siguiente libre. Con mas
-    proyectos que colores la repeticion es inevitable, pero ya no gratuita:
-    con 6 colores y 13 proyectos habia tres pares identicos (la queja de
-    Miguel, 2026-09-02).
+    La asignacion es PEGAJOSA. Sondear sobre la paleta entera cada vez parecia
+    estable, pero con la paleta llena un alta rebarajaba a TODOS (parte del
+    maestro, 2026-09-02: al aparecer el proyecto 15 cambiaron los 14 tonos y
+    encima aparecio un duplicado). Por eso lo ya asignado se recuerda en
+    colors.conf y un proyecto nuevo solo sondea colores libres: dar de alta
+    jamas recolorea a los existentes.
+
+    Prioridad: `color=#hex` del .px.conf del proyecto > colors.conf > hueco
+    libre de la paleta (hash djb2 + sondeo). Agotada la paleta se repite tono
+    — y `px ls` lo avisa sugiriendo el override, en vez de duplicar en
+    silencio. Las entradas de proyectos que ya no existen se conservan (si el
+    proyecto vuelve, recupera su tono) pero no bloquean colores.
 
     OJO consumidores: calcularlo sobre TODOS los proyectos, no los visibles —
     si dependiera del entorno activo, cambiar de entorno recolorearia.
     """
+    names = {p.name for p in ps}
     out, taken = {}, set()
     for p in ps:
         c = p.color_override
         if c:
             out[p.name] = c
             taken.add(c.lower())
+    saved = dict(read_conf(COLORS_CONF))
+    for name, c in saved.items():
+        if name in names and name not in out and c:
+            out[name] = c
+            taken.add(c.lower())
     n = len(PROJECT_PALETTE)
-    for name in sorted(p.name for p in ps if p.name not in out):
+    fresh = {}
+    for name in sorted(names - set(out)):
         h = 5381
         for b in name.encode("utf-8"):
             h = (h * 33 + b) & 0xFFFFFFFF   # djb2, el mismo de Theme.swift
@@ -315,8 +329,16 @@ def project_colors(ps):
             if c.lower() not in taken:
                 color = c
                 break
-        out[name] = color
+        out[name] = fresh[name] = color
         taken.add(color.lower())
+    if fresh:
+        saved.update(fresh)
+        lines = ["# Memoria de colores de proyecto: la apunta px al asignar,",
+                 "# para que un alta nueva no recoloree a los existentes.",
+                 "# Editable; el `color=#hex` del .px.conf de cada proyecto",
+                 "# manda sobre esto."]
+        lines += ["%-16s %s" % (k, v) for k, v in sorted(saved.items())]
+        atomic_write(COLORS_CONF, "\n".join(lines) + "\n")
     return out
 
 
@@ -800,6 +822,17 @@ def cmd_ls(argv):
                 for k, v in o.items()]
         print("  %sfuera del entorno '%s':%s %s\n"
               % (C["y"], current_ws(), C["x"], "  ".join(bits)))
+    # paleta agotada: duplicar en silencio seria esconder la perdida de
+    # identidad por color — se avisa y se da la salida (el override)
+    por_color = {}
+    for nm, c in colors.items():
+        por_color.setdefault(str(c).lower(), []).append(nm)
+    reps = sorted(v for v in por_color.values() if len(v) > 1)
+    if reps:
+        print("  %scolores repetidos (paleta agotada):%s %s\n"
+              "  %sfija uno a mano con `color=#hex` en el .px.conf del proyecto%s\n"
+              % (C["y"], C["x"], "; ".join(" y ".join(sorted(g)) for g in reps),
+                 C["d"], C["x"]))
     return 0
 
 

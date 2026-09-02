@@ -225,11 +225,18 @@ Cada proyecto tiene un color estable: la barra lateral y las pestañas de la
 app lo usan para que el grupo se lea de un vistazo, y `px ls` tiñe el nombre
 con el mismo. Lo asigna px — no la app — sobre una paleta de 14 tonos,
 evitando que dos proyectos coincidan mientras alcance, y viaja en `px json`
-para que CLI y GUI no se contradigan. Se calcula sobre **todos** los
-proyectos, no los del entorno activo: cambiar de entorno no recolorea.
+para que CLI y GUI no se contradigan.
 
-Para fijar uno a mano, una línea en el `.px.conf` del proyecto (misma sintaxis
-que `workspaces.conf`):
+La asignación es **pegajosa**: lo asignado se recuerda en
+`~/.config/px/colors.conf` (editable) y un proyecto nuevo solo toma colores
+libres — dar de alta jamás recolorea a los existentes. Se descubrió por las
+malas: con la paleta llena, el alta del proyecto 15 rebarajó los 14 tonos
+anteriores. Tampoco depende del entorno activo: cambiar de entorno no
+recolorea.
+
+Si la paleta se agota, px repite tono pero `px ls` lo avisa y sugiere la
+salida: fijar uno a mano con una línea en el `.px.conf` del proyecto (misma
+sintaxis que `workspaces.conf`), que manda sobre todo lo demás:
 
 ```
 color=#E0607E
