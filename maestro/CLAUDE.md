@@ -43,16 +43,24 @@ Tu carpeta es el repo del utillaje: `/Volumes/PERSONAL/Proyectos/_px`
 
 Una conversación que nació fuera (Ghostty, cmux, un terminal suelto) se muda sin
 perder el hilo. `--continue` **no** vale: coge la más reciente de esa carpeta,
-que puede ser otra distinta.
+que puede ser otra distinta. Dos comandos, **uno por máquina** (README
+§"Mudar conversaciones"):
 
 ```bash
-# desde la máquina donde vive la conversación (normalmente el MacBook)
-px handoff <proyecto>/<agente>                    # la más reciente de esa carpeta
-px handoff <proyecto>/<agente> --session <uuid>   # una concreta
+# en el Studio (el transcript ya está en esta máquina)
+px adopt <proyecto>/<agente> --session <uuid>     # pin: la próxima apertura reanuda ESA
+
+# en el MacBook (vive en px-remote; en el Studio no existe a propósito)
+px handoff <proyecto>/<agente> [--session <uuid>] # copia el transcript por scp + adopción
 ```
 
-Copia el transcript al Studio y deja marcado que la **próxima** apertura de esa
-pestaña use `claude --resume <uuid>`. La marca es de un solo uso.
+La marca es de un solo uso y `adopt` exige la pestaña cerrada. Sirve también
+para **recuperar tras un corte** cuando ya se quemó `px restore`/`--continue`
+(pestañas nuevas abiertas encima): adoptas el uuid de antes del corte. Desde
+2026-09-02, `px attach` pregunta `¿Reanudarla? [S/n]` al crear sesión sobre una
+conversación que figura viva en el último registro — solo en el caso
+inequívoco (su transcript sigue siendo el más reciente de la carpeta); un pin
+de `adopt` tiene precedencia.
 
 ⚠️ **Cierra la sesión de origen antes de abrir la pestaña.** Dos `claude` sobre
 el mismo transcript se pisan.
