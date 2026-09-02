@@ -831,21 +831,41 @@ def cmd_open(argv):
     if not shutil_which(CLAUDE_BIN):
         die("'%s' no esta en el PATH" % CLAUDE_BIN)
 
-    last, nuevas = None, []
+    last, nuevas, negadas = None, [], 0
     for spec in specs:
         ag = resolve(spec)
         sess = ag.project.session
-        if not tmux_ok("has-session", "-t", "=" + sess):
+        sess_exists = tmux_ok("has-session", "-t", "=" + sess)
+        if sess_exists and window_exists(sess, ag.name) is not None:
+            print("  %ssalta%s    %s ya estaba abierta" % (C["d"], C["x"], ag.spec))
+            last = (sess, ag.name)
+            continue
+        # El mismo candado que px attach: un solo agente por directorio, venga
+        # por la ruta que venga (la app crea sesiones pxa-*, esto ventanas px-*).
+        other = occupant(ag.path)
+        if other:
+            print("  %sniego%s    %s: ya hay un agente en esa carpeta "
+                  "(sesion '%s', %s)\n           %sengancha o cierra: "
+                  "tmux attach -t %s%s"
+                  % (C["y"], C["x"], ag.spec, other["session"], other["cmd"],
+                     C["d"], other["session"], C["x"]))
+            negadas += 1
+            continue
+        # El pin de `px adopt` manda tambien en esta ruta, no solo en attach
+        # (parte del maestro, 2026-09-02: open ignoraba la adopcion y encima
+        # pegaba el brief sobre la sesion virgen).
+        pinned = take_pin(session_name(ag))
+        if not sess_exists:
             tmux("new-session", "-d", "-s", sess, "-n", ag.name, "-c", ag.path)
             apply_theme(sess)
-            launch(sess, ag.name)
-            nuevas.append(ag)
-            print("  %sabierta%s  %s  %s%s%s" % (C["g"], C["x"], ag.spec, C["d"], ag.relpath, C["x"]))
-        elif window_exists(sess, ag.name) is not None:
-            print("  %ssalta%s    %s ya estaba abierta" % (C["d"], C["x"], ag.spec))
         else:
             tmux("new-window", "-t", "=" + sess, "-n", ag.name, "-c", ag.path)
-            launch(sess, ag.name)
+        launch(sess, ag.name, resume=pinned)
+        if pinned:
+            # reanuda una conversacion: ya tiene contexto, nada de brief
+            print("  %sreanuda%s  %s  %stranscript %s%s" % (
+                C["g"], C["x"], ag.spec, C["d"], pinned[:8], C["x"]))
+        else:
             nuevas.append(ag)
             print("  %sabierta%s  %s  %s%s%s" % (C["g"], C["x"], ag.spec, C["d"], ag.relpath, C["x"]))
         last = (sess, ag.name)
@@ -869,12 +889,13 @@ def cmd_open(argv):
     daemon(once=True)
     if last and do_attach:
         attach(last[0], last[1])
-    return 0
+    return 3 if negadas else 0
 
 
-def launch(sess, wname):
+def launch(sess, wname, resume=None):
     """Arranca claude en la ventana. El brief se pega despues (ver paste_brief)."""
-    tmux("send-keys", "-t", "=%s:%s" % (sess, wname), CLAUDE_BIN, "C-m")
+    line = CLAUDE_BIN + ((" --resume " + resume) if resume else "")
+    tmux("send-keys", "-t", "=%s:%s" % (sess, wname), line, "C-m")
 
 
 def wait_ready(target, timeout=180.0, estable=3, intervalo=0.5):
@@ -1502,7 +1523,6 @@ def cmd_attach(argv):
     pinned, nueva = None, False
     if not tmux_ok("has-session", "-t", "=" + session):
         nueva = True
-        pinned = take_pin(session)
         other = occupant(ag.path)
         if other:
             sys.stderr.write(
@@ -1513,6 +1533,10 @@ def cmd_attach(argv):
                 "        tmux attach -t %s\n\n"
                 % (ag.relpath, other["session"], other["cmd"], other["session"]))
             return 3
+        # El pin es de un solo uso: se consume DESPUES del candado, o un
+        # attach abortado con 3 quemaba la adopcion en silencio (parte del
+        # maestro, 2026-09-02, alta de fluge).
+        pinned = take_pin(session)
     reanuda = bool(pinned) or resume   # arranca sobre una conversacion previa
     if pinned:
         cmd = [CLAUDE_BIN, "--resume", pinned]

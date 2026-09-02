@@ -238,7 +238,8 @@ color=#E0607E
 ## Un solo agente por directorio
 
 Dos agentes en la misma carpeta se pisan los ficheros. `px attach` — que es lo
-que ejecuta cada pestaña de la app — se niega a arrancar un segundo:
+que ejecuta cada pestaña de la app — se niega a arrancar un segundo, y
+`px open` (la ruta TUI) aplica el mismo candado ventana a ventana:
 
 ```
 px: YA HAY UN AGENTE en 08_ODOO_CRM/accountant
@@ -261,7 +262,7 @@ Para quien scripte contra `px` (el maestro, sobre todo):
 |--------|-----------|
 | `0` | hecho |
 | `1` | no se pudo hacer lo pedido (proyecto/agente desconocido, o **existe pero lo filtra el entorno** — el mensaje distingue los dos casos) |
-| `3` | `px attach` se negó: ya hay un agente en esa carpeta |
+| `3` | `px attach` (o `px open`) se negó: ya hay un agente en esa carpeta |
 | `130` | interrumpido (Ctrl-C) |
 
 Un proyecto filtrado por el entorno sale con `1` a propósito: pediste listarlo y
