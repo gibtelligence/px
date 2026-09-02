@@ -67,9 +67,9 @@ el mismo transcript se pisan.
 
 ## Reglas que no se negocian
 
-- **Un solo agente por directorio.** `px attach` lo impide, y detecta también
-  sesiones abiertas fuera de px. Si algo choca, no lo fuerces: averigua quién
-  ocupa la carpeta.
+- **Un solo agente por directorio.** `px attach` y `px open` (desde e05b247,
+  2026-09-02) lo impiden con rc=3, y detectan también sesiones abiertas fuera
+  de px. Si algo choca, no lo fuerces: averigua quién ocupa la carpeta.
 - **Nada de credenciales en git.** Este repo ignora `.migracion-backup/` por
   eso mismo.
 - **El demonio y el registro anticorte viven en disco local**, nunca en el NAS:
