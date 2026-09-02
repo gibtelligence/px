@@ -118,6 +118,21 @@ px restore -y        # recrea las sesiones con `claude --continue`
 - **`px restore`** distingue lo que sigue vivo de lo que se perdió, no duplica
   nada, y salta las carpetas que ya no existen.
 
+Y dos salvaguardas al **reabrir** (nacieron del apagón del 2026-09-01, en el
+que la app se abrió antes que `px restore` y cada pestaña arrancó un claude
+de cero):
+
+- Si al crear una pestaña la carpeta tiene una conversación que figura viva en
+  el último registro (murió sin `px close`), `px attach` **pregunta** antes de
+  arrancar de cero: `Reanudarla? [S/n]` (Enter = sí). Arrancar de cero quema
+  la ventana de recuperación — la conversación virgen pasa a ser "la más
+  reciente" y `--continue` cogería esa. Sin terminal interactivo no pregunta:
+  avisa y deja impreso el `px adopt` exacto para recuperarla después.
+- La cola de pantalla de la vida anterior **no se pisa**: al recrear una
+  sesión se archiva en `panes/anterior/` con la fecha de la captura (se poda
+  a los 30 días). La foto de "qué estaba haciendo cada agente al corte" era
+  justo lo que se quería mirar tras reabrir.
+
 Dos cosas que condicionan el diseño, y que se descubrieron probando:
 
 1. **El demonio no puede vivir en el NAS.** Bajo `launchd`, macOS deniega el
@@ -128,6 +143,20 @@ Dos cosas que condicionan el diseño, y que se descubrieron probando:
 2. **El registro no consulta el NAS.** El proyecto y el agente se deducen del
    nombre de la sesión (`pxa-<proyecto>-<agente>`) y el cwd es la cadena que da
    tmux. Nada de `stat` sobre disco de red.
+
+## Mudar conversaciones: `adopt` y `handoff`
+
+Dos comandos, uno por máquina — conviene no confundirlos:
+
+- **`px adopt <proy>/<ag> --session <uuid>`** (en el Studio): fija que la
+  **próxima** apertura de esa pestaña reanude ESA conversación. `--continue`
+  no sirve para mudar: coge la más reciente de la carpeta, que puede ser otra.
+  El transcript tiene que estar ya en el Studio.
+- **`px handoff <proy>/<ag> [--session <uuid>]`** (solo en el MacBook: vive en
+  `px-remote`): muda una conversación nacida allí — copia su transcript al
+  Studio por scp y deja hecha la adopción, en un comando. En el Studio el
+  comando no existe, a propósito: el transcript ya está en la máquina y basta
+  `adopt`.
 
 ## Entornos de trabajo (empresa vs personal)
 
@@ -189,6 +218,22 @@ px order gibtelligence eez px  # fijarlo
 activo; si reescribiera la lista entera con lo que ve, borraría el orden de los
 del otro entorno. Los nombres recibidos ocupan las mismas posiciones que ya
 ocupaban entre ellos, en el nuevo orden relativo, y el resto no se mueve.
+
+## Colores de proyecto
+
+Cada proyecto tiene un color estable: la barra lateral y las pestañas de la
+app lo usan para que el grupo se lea de un vistazo, y `px ls` tiñe el nombre
+con el mismo. Lo asigna px — no la app — sobre una paleta de 14 tonos,
+evitando que dos proyectos coincidan mientras alcance, y viaja en `px json`
+para que CLI y GUI no se contradigan. Se calcula sobre **todos** los
+proyectos, no los del entorno activo: cambiar de entorno no recolorea.
+
+Para fijar uno a mano, una línea en el `.px.conf` del proyecto (misma sintaxis
+que `workspaces.conf`):
+
+```
+color=#E0607E
+```
 
 ## Un solo agente por directorio
 

@@ -20,7 +20,7 @@ final class GroupHeader: NSView, NSDraggingSource {
         arrow.textColor = Theme.fg.withAlphaComponent(0.55)   // tiene que verse: es el mando
         let dot = NSTextField(labelWithString: "▌")
         dot.font = .systemFont(ofSize: 13)
-        dot.textColor = Theme.projectColor(project.name)
+        dot.textColor = project.nsColor
         let name = NSTextField(labelWithString: project.name.uppercased())
         name.font = .systemFont(ofSize: 10, weight: .semibold)
         name.textColor = Theme.dim
@@ -174,7 +174,7 @@ final class TabButton: NSView {
     private var active = false
 
     init(project: Project, agent: Agent) {
-        color = Theme.projectColor(project.name)
+        color = project.nsColor
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = 6

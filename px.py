@@ -54,6 +54,27 @@ STATES = {
 }
 
 VIOLET, INK, DIM, FG = "#7c5cff", "#0b0b0f", "#4a4a55", "#c9c9d2"
+
+# Paleta de colores de proyecto. El orden esta entrelazado a proposito: cuando
+# dos proyectos caen en el mismo hueco, el sondeo avanza al siguiente, y asi
+# el vecino es un tono claramente distinto, no el de al lado en la rueda.
+# La app lleva una copia (Theme.projectColor) como respaldo sin `px json`.
+PROJECT_PALETTE = [
+    "#7C5CFF",  # violeta
+    "#54C07A",  # verde
+    "#FFB020",  # ambar
+    "#4FC7E8",  # celeste
+    "#E0607E",  # rosa
+    "#A6CC3C",  # lima
+    "#B06CE8",  # orquidea
+    "#2EC4B6",  # turquesa
+    "#FF8A4C",  # naranja
+    "#5E8DFF",  # azul
+    "#E5C838",  # amarillo
+    "#E060C8",  # magenta
+    "#8A93A8",  # acero
+    "#C08552",  # caramelo
+]
 C = {"b": "\033[1m", "d": "\033[2m", "v": "\033[38;5;99m", "g": "\033[32m",
      "y": "\033[33m", "r": "\033[31m", "c": "\033[36m", "x": "\033[0m"}
 
@@ -130,6 +151,16 @@ class Project(object):
         for a in self.agents:
             if a.name == name:
                 return a
+        return None
+
+    @property
+    def color_override(self):
+        """Linea `color=#hex` en el .px.conf (misma sintaxis que workspaces.conf)."""
+        for k, v in read_conf(os.path.join(self.path, ".px.conf")):
+            if k.startswith("color="):
+                c = k[6:] or v
+                if c:
+                    return c
         return None
 
 
@@ -254,6 +285,50 @@ def projects():
     return apply_order(out)
 
 
+def project_colors(ps):
+    """{proyecto: '#hex'} estable y sin colisiones mientras alcance la paleta.
+
+    Primero los overrides (`color=#hex` en el .px.conf de cada proyecto);
+    el resto, en orden alfabetico (estable ante reordenaciones), toma el hueco
+    que le da su hash y, si esta cogido, sondea al siguiente libre. Con mas
+    proyectos que colores la repeticion es inevitable, pero ya no gratuita:
+    con 6 colores y 13 proyectos habia tres pares identicos (la queja de
+    Miguel, 2026-09-02).
+
+    OJO consumidores: calcularlo sobre TODOS los proyectos, no los visibles —
+    si dependiera del entorno activo, cambiar de entorno recolorearia.
+    """
+    out, taken = {}, set()
+    for p in ps:
+        c = p.color_override
+        if c:
+            out[p.name] = c
+            taken.add(c.lower())
+    n = len(PROJECT_PALETTE)
+    for name in sorted(p.name for p in ps if p.name not in out):
+        h = 5381
+        for b in name.encode("utf-8"):
+            h = (h * 33 + b) & 0xFFFFFFFF   # djb2, el mismo de Theme.swift
+        color = PROJECT_PALETTE[h % n]
+        for k in range(n):
+            c = PROJECT_PALETTE[(h + k) % n]
+            if c.lower() not in taken:
+                color = c
+                break
+        out[name] = color
+        taken.add(color.lower())
+    return out
+
+
+def ansi_rgb(hexcolor):
+    """'#RRGGBB' -> secuencia truecolor de primer plano ('' si no es valido)."""
+    try:
+        v = int(str(hexcolor).lstrip("#"), 16)
+    except (ValueError, AttributeError):
+        return ""
+    return "\033[38;2;%d;%d;%dm" % (v >> 16 & 255, v >> 8 & 255, v & 255)
+
+
 def read_order():
     """Orden manual de proyectos (uno por linea). Lo escribe la app al
     arrastrar; vive en la config y no en la app para que `px ls` y la barra
@@ -316,7 +391,10 @@ def project(name):
 def discover_agents(proj):
     """.px.conf manda; si no existe, se descubre por CLAUDE.md."""
     conf = os.path.join(proj.path, ".px.conf")
-    rows = read_conf(conf)
+    # `color=` es del proyecto, no un agente. Se filtra ANTES de decidir si el
+    # conf "tiene filas": un .px.conf con solo el color no debe anular el
+    # descubrimiento por CLAUDE.md.
+    rows = [r for r in read_conf(conf) if not r[0].startswith("color=")]
     if rows:
         out = []
         for name, rel in rows:
@@ -690,12 +768,13 @@ def cmd_ls(argv):
                     % (only, current_ws()))
             die("proyecto desconocido: %s" % only)
         ps = sel
+    colors = project_colors(projects())   # todos, no los visibles: estabilidad
     print("")
     for p in ps:
         agents = p.agents
         openn = sum(1 for a in agents if agent_state(live, p, a))
-        print("%s%s%s %s(%s)%s %s%d agentes%s%s" % (
-            C["b"], p.name, C["x"], C["d"], p.path, C["x"],
+        print("%s%s%s%s %s(%s)%s %s%d agentes%s%s" % (
+            C["b"], ansi_rgb(colors.get(p.name)), p.name, C["x"], C["d"], p.path, C["x"],
             C["d"], len(agents), C["x"],
             "  %s%d abiertos%s" % (C["v"], openn, C["x"]) if openn else ""))
         for a in agents:
@@ -1053,8 +1132,10 @@ def cmd_json(argv):
                           for n, c, pr in workspaces()],
            "others": others_summary(),
            "projects": []}
+    colors = project_colors(projects())   # todos, no los visibles: estabilidad
     for p in visible(projects()):
-        pj = {"name": p.name, "path": p.path, "session": p.session, "agents": []}
+        pj = {"name": p.name, "path": p.path, "session": p.session,
+              "color": colors.get(p.name), "agents": []}
         for a in p.agents:
             st, age = agent_state(live, p, a) or (None, None)
             pj["agents"].append({
@@ -1311,6 +1392,77 @@ def cmd_adopt(argv):
     return 0
 
 
+def orphan_conversation(ag):
+    """Conversacion que estaba viva en el ultimo registro y ya no tiene sesion.
+
+    Tras un corte de luz (o un tmux muerto sin `px close`), state.json conserva
+    la fila del agente con su transcript. Si al abrir la pestana se arranca un
+    claude de cero, se quema la ventana de recuperacion: la conversacion virgen
+    nueva pasa a ser "la mas reciente" y `--continue` / `px restore` cogerian
+    esa. Paso con el apagon del 2026-09-01: la app reabrio 5 pestanas y las 5
+    arrancaron de cero.
+
+    Devuelve la fila del registro solo si es inequivoco: habia claude corriendo
+    ahi, su transcript sigue siendo el mas reciente de la carpeta, y el fichero
+    existe. Si alguien ya abrio otra conversacion despues, no opina.
+    """
+    st = load_state()
+    if not st:
+        return None
+    want = real(ag.path)
+    for r in st.get("agents", []):
+        if not r.get("running_claude") or real(r.get("cwd", "")) != want:
+            continue
+        uuid = r.get("transcript")
+        if not uuid:
+            return None
+        newest, _m = transcript_for(ag.path)
+        if newest != uuid:
+            return None
+        if not os.path.isfile(os.path.join(CLAUDE_PROJECTS, mangle(ag.path),
+                                           uuid + ".jsonl")):
+            return None
+        return r
+    return None
+
+
+def archive_pane_queue(session):
+    """Aparta la cola de pantalla de la vida ANTERIOR de una sesion.
+
+    El demonio sobreescribe panes/<sesion>_<n>.txt cada 15 s; si la sesion se
+    recrea tras un corte, la foto de "que estaba haciendo cada agente" se
+    pisaria justo cuando se quiere mirar (paso el 2026-09-02). Se mueve a
+    panes/anterior/ con la fecha de la captura, y se poda lo de +30 dias.
+    """
+    try:
+        fns = os.listdir(PANE_DIR)
+    except OSError:
+        return
+    adir = os.path.join(PANE_DIR, "anterior")
+    pre = session + "_"
+    for fn in fns:
+        # <sesion>_<ventana>.txt exacto: una sesion puede ser prefijo de otra
+        if not (fn.startswith(pre) and fn.endswith(".txt")
+                and fn[len(pre):-4].isdigit()):
+            continue
+        src = os.path.join(PANE_DIR, fn)
+        try:
+            stamp = time.strftime("%Y%m%d-%H%M%S",
+                                  time.localtime(os.path.getmtime(src)))
+            os.makedirs(adir, exist_ok=True)
+            os.replace(src, os.path.join(adir, "%s-%s.txt" % (fn[:-4], stamp)))
+        except OSError:
+            pass
+    try:
+        cutoff = time.time() - 30 * 86400
+        for fn in os.listdir(adir):
+            p = os.path.join(adir, fn)
+            if os.path.getmtime(p) < cutoff:
+                os.unlink(p)
+    except OSError:
+        pass
+
+
 def take_pin(session):
     """Lee y CONSUME el pin (de un solo uso)."""
     p = pin_path(session)
@@ -1361,15 +1513,51 @@ def cmd_attach(argv):
                 "        tmux attach -t %s\n\n"
                 % (ag.relpath, other["session"], other["cmd"], other["session"]))
             return 3
+    reanuda = bool(pinned) or resume   # arranca sobre una conversacion previa
     if pinned:
         cmd = [CLAUDE_BIN, "--resume", pinned]
     else:
         cmd = [CLAUDE_BIN] + (["--continue"] if resume else [])
+        if nueva and not resume:
+            r = orphan_conversation(ag)
+            if r:
+                uuid = r["transcript"]
+                edad = human_age(time.time() - (r.get("transcript_mtime")
+                                                or r.get("at") or time.time()))
+                if sys.stdin.isatty():
+                    # Preguntar, no decidir: arrancar de cero quema la ventana
+                    # de recuperacion, pero reanudar en silencio tampoco es lo
+                    # que se pidio al abrir la pestana. Enter = reanudar, que
+                    # es la opcion que no pierde nada.
+                    sys.stdout.write(
+                        "\n  px: aqui habia una conversacion viva que no se"
+                        " cerro con px\n      %s(transcript %s · ultimo cambio"
+                        " hace %s)%s\n      Reanudarla? [S/n] "
+                        % (C["d"], uuid[:8], edad, C["x"]))
+                    sys.stdout.flush()
+                    try:
+                        resp = input().strip().lower()
+                    except EOFError:
+                        resp = ""
+                    if resp in ("", "s", "si", "y", "yes"):
+                        cmd = [CLAUDE_BIN, "--resume", uuid]
+                        reanuda = True
+                else:
+                    sys.stderr.write(
+                        "px: OJO: aqui habia una conversacion viva (transcript"
+                        " %s).\n    Arranco de cero; para recuperarla despues:\n"
+                        "        px adopt %s --session %s\n"
+                        % (uuid[:8], ag.spec, uuid))
 
-    # Brief: solo al CREAR la sesion, y nunca sobre un --resume (una
+    # La cola de pantalla de la vida anterior se archiva ANTES de recrear la
+    # sesion: si no, el demonio la pisa a los 15 s con la pantalla nueva.
+    if nueva:
+        archive_pane_queue(session)
+
+    # Brief: solo al CREAR la sesion, y nunca sobre un --resume/--continue (una
     # conversacion reanudada ya tiene su contexto; pegarle el brief encima
     # seria ruido). Va en segundo plano porque abajo hacemos execvp.
-    if nueva and not pinned and not no_brief and ag.brief:
+    if nueva and not reanuda and not no_brief and ag.brief:
         try:
             subprocess.Popen([sys.executable, os.path.abspath(__file__),
                               "paste-brief", ag.spec],
@@ -1445,6 +1633,7 @@ def cmd_restore(argv):
             continue
         session = "pxa-%s-%s" % (r["project"].replace(".", "_"),
                                  r["agent"].replace(".", "_"))  # noqa
+        archive_pane_queue(session)   # la foto del corte, a panes/anterior/
         tmux("new-session", "-d", "-s", session, "-c", r["cwd"],
              CLAUDE_BIN, "--continue")
         print("  %srestaurado%s %s/%s -> %s" % (C["g"], C["x"], r["project"],
@@ -1703,6 +1892,7 @@ px — terminal de proyectos y agentes
   px scan [proyecto]      (re)genera el .px.conf del proyecto
   px onboard <ruta>       analiza y valida un proyecto para darlo de alta
   px adopt <ag> -s <id>   la proxima apertura reanuda ESA conversacion
+  px handoff <ag> [-s id] (solo MacBook) copia el transcript al Studio y adopta
   px sessions             que hay vivo y que se restauraria tras un corte
   px restore [-y]         recrea las sesiones perdidas (claude --continue)
   px theme                re-aplica estilo y atajos a lo que ya este abierto

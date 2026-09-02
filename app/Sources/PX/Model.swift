@@ -127,6 +127,17 @@ struct Project: Decodable {
     let path: String
     let session: String
     let agents: [Agent]
+    /// Asignado por px (paleta sin colisiones + `color=#hex` del .px.conf).
+    /// Opcional para convivir con un `px json` viejo que no lo mande.
+    let color: String?
+
+    var nsColor: NSColor {
+        guard let c = color else { return Theme.projectColor(name) }
+        var h: UInt32 = 0
+        let hex = c.hasPrefix("#") ? String(c.dropFirst()) : c
+        Scanner(string: hex).scanHexInt32(&h)
+        return h == 0 ? Theme.projectColor(name) : Theme.hex(h)
+    }
 }
 
 struct Workspace: Decodable {
