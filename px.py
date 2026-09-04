@@ -1304,6 +1304,11 @@ def live_agents(deep=None):
     if deep is None:
         deep = os.path.isdir(ROOT)
     idx = agent_index() if deep else {}
+    # nombre de sesion exacto -> (proyecto, agente). El split del nombre es
+    # AMBIGUO si el proyecto lleva guiones (finanzas-personales): con reparto
+    # a mano se resuelve exacto, y el split queda de ultimo recurso.
+    by_sess = {session_name_for(p.name, a.name): (p.name, a.name)
+               for (p, a) in idx.values()}
     fmt = ("#{session_name}\t#{window_index}\t#{pane_current_path}"
            "\t#{pane_current_command}\t#{pane_pid}")
     out = []
@@ -1317,16 +1322,21 @@ def live_agents(deep=None):
         if key in seen:
             continue
         proj = agent = None
-        if sess.startswith(AGENT_SESS_PREFIX):
-            # pxa-<proyecto>-<agente>: el proyecto no lleva guiones (es un slug
-            # de carpeta), asi que el primer guion tras el prefijo separa.
-            rest = sess[len(AGENT_SESS_PREFIX):]
-            if "-" in rest:
-                proj, agent = rest.split("-", 1)
-        if proj is None and deep:
+        if deep:
             hit = idx.get(real(path))
             if hit:
                 proj, agent = hit[0].name, hit[1].name
+        if proj is None and sess.startswith(AGENT_SESS_PREFIX):
+            if sess in by_sess:
+                proj, agent = by_sess[sess]
+            else:
+                # sin reparto (demonio bajo launchd: /Volumes vetado) queda la
+                # aproximacion de siempre — partir por el primer guion. Los
+                # consumidores serios (restore, orphan_conversation) validan
+                # por cwd, que es lo que no miente.
+                rest = sess[len(AGENT_SESS_PREFIX):]
+                if "-" in rest:
+                    proj, agent = rest.split("-", 1)
         if proj is None:
             continue
         seen.add(key)
@@ -1651,27 +1661,50 @@ def cmd_sessions(argv):
 
 
 def cmd_restore(argv):
-    """Reconstruye tras un corte: recrea las sesiones con `claude --continue`."""
+    """Reconstruye tras un corte: recrea las sesiones con `claude --continue`.
+
+    Cada fila de state.json se valida contra el reparto ACTUAL (por cwd, que
+    es lo que no miente): el registro puede ser anterior a un renombre en el
+    .px.conf, y recrear a ciegas resucitaria sesiones con nombres que ya no
+    existen. Un renombre se recrea bajo el nombre NUEVO (la conversacion vive
+    en la carpeta, --continue la encuentra igual); una carpeta que ya no esta
+    en el reparto no se recrea — se avisa con la salida a mano.
+    """
     st = load_state()
     if not st or not st.get("agents"):
         die("no hay registro que restaurar (%s)" % STATE_FILE)
+    if not os.path.isdir(ROOT) and not read_conf(PROJECTS_CONF):
+        # sin reparto no se puede validar nada — y suele significar NAS caido,
+        # que es distinto de "estas carpetas ya no existen"
+        die("el reparto no responde (%s no accesible): monta el disco y repite" % ROOT)
     yes = "-y" in argv or "--yes" in argv
     alive = {real(r["cwd"]) for r in live_agents(deep=True)}
-    plan, skip = [], []
+    idx = agent_index()
+    plan, skip, fuera = [], [], []
     for r in st["agents"]:
-        (skip if real(r["cwd"]) in alive else plan).append(r)
+        if real(r["cwd"]) in alive:
+            skip.append(r)
+            continue
+        hit = idx.get(real(r["cwd"]))
+        (plan if hit else fuera).append((r, hit))
 
-    print("\n%sRestaurar%s %s(registro de hace %s)%s" % (
+    print("\n%sRestaurar%s %s(registro de %s)%s" % (
         C["b"], C["x"], C["d"], human_age(time.time() - st.get("saved_at", 0)), C["x"]))
     for r in skip:
         print("  %sya vivo%s   %s/%s" % (C["d"], C["x"], r["project"], r["agent"]))
-    for r in plan:
+    for r, _ in fuera:
+        print("  %sfuera%s     %s/%s: su carpeta ya no esta en el reparto — no se"
+              " recrea\n            %s(si la quieres: claude --continue en %s)%s"
+              % (C["y"], C["x"], r["project"], r["agent"], C["d"], r["cwd"], C["x"]))
+    for r, (p, a) in plan:
         uuid = (r.get("transcript") or "")[:8]
-        print("  %srecrear%s   %s/%s  %s%s · claude --continue%s" % (
-            C["g"], C["x"], r["project"], r["agent"], C["d"],
+        era = ("  %s(era %s/%s)%s" % (C["y"], r["project"], r["agent"], C["x"])
+               if (p.name, a.name) != (r["project"], r["agent"]) else "")
+        print("  %srecrear%s   %s/%s%s  %s%s · claude --continue%s" % (
+            C["g"], C["x"], p.name, a.name, era, C["d"],
             r["cwd"], C["x"]) + ("  %s[%s]%s" % (C["d"], uuid, C["x"]) if uuid else ""))
     if not plan:
-        print("\n  nada que restaurar: todo sigue vivo\n")
+        print("\n  nada que restaurar: todo lo restaurable sigue vivo\n")
         return 0
     if not yes:
         print("\n  %s%d sesion(es) a recrear. Repite con -y para hacerlo.%s\n"
@@ -1679,22 +1712,17 @@ def cmd_restore(argv):
         return 0
 
     done = 0
-    for r in plan:
-        if not os.path.isdir(r["cwd"]):
-            print("  %ssalta%s     %s/%s: la carpeta ya no existe"
-                  % (C["y"], C["x"], r["project"], r["agent"]))
-            continue
+    for r, (p, a) in plan:
         if occupant(r["cwd"]):
             print("  %ssalta%s     %s/%s: alguien la ocupa ya"
-                  % (C["y"], C["x"], r["project"], r["agent"]))
+                  % (C["y"], C["x"], p.name, a.name))
             continue
-        session = "pxa-%s-%s" % (r["project"].replace(".", "_"),
-                                 r["agent"].replace(".", "_"))  # noqa
+        session = session_name_for(p.name, a.name)
         archive_pane_queue(session)   # la foto del corte, a panes/anterior/
-        tmux("new-session", "-d", "-s", session, "-c", r["cwd"],
+        tmux("new-session", "-d", "-s", session, "-c", a.path,
              CLAUDE_BIN, "--continue")
-        print("  %srestaurado%s %s/%s -> %s" % (C["g"], C["x"], r["project"],
-                                                r["agent"], session))
+        print("  %srestaurado%s %s/%s -> %s" % (C["g"], C["x"], p.name,
+                                                a.name, session))
         done += 1
     print("\n  %d sesion(es) recreadas. Abre PX y las veras.\n" % done)
     return 0

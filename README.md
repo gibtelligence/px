@@ -116,7 +116,12 @@ px restore -y        # recrea las sesiones con `claude --continue`
   `~/.local/state/px/panes/`. Tras un apagón puedes ver qué estaba haciendo cada
   agente en ese momento.
 - **`px restore`** distingue lo que sigue vivo de lo que se perdió, no duplica
-  nada, y salta las carpetas que ya no existen.
+  nada, y valida cada fila del registro contra el reparto **actual** (por
+  cwd): un renombre en el `.px.conf` entre el registro y el corte se recrea
+  bajo el nombre nuevo (`recrear finanzas (era raiz)`), y una carpeta que ya
+  no está en el reparto no se recrea — se avisa, con el `claude --continue`
+  a mano por si se quiere igualmente. Recrear a ciegas resucitaría sesiones
+  con nombres que ya no existen.
 
 Y dos salvaguardas al **reabrir** (nacieron del apagón del 2026-09-01, en el
 que la app se abrió antes que `px restore` y cada pestaña arrancó un claude
