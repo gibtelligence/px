@@ -1743,7 +1743,10 @@ def cmd_onboard(argv):
     # nombres de Miguel). Usar los descubiertos daba falsos "sin brief".
     found = discover_agents(tmp) if os.path.isfile(os.path.join(path, ".px.conf")) else scanned
     if os.path.isfile(conf):
-        ok.append(".px.conf presente (%d agentes declarados)" % len(read_conf(conf)))
+        # color=#hex es del proyecto, no un agente: fuera del contador (el
+        # maestro valida las altas con este numero y descuadraba)
+        declared = [r for r in read_conf(conf) if not r[0].startswith("color=")]
+        ok.append(".px.conf presente (%d agentes declarados)" % len(declared))
     elif found:
         (ok if apply else warn).append(
             "sin .px.conf; %d carpeta(s) con CLAUDE.md detectada(s)%s"
