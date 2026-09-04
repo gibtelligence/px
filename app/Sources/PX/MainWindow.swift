@@ -241,6 +241,12 @@ final class MainWindowController: NSObject {
         let visibles = Set(m.projects.map { $0.name })
         tabBar.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for t in tabs where visibles.contains(t.project.name) {
+            // Huerfana solo si el PROYECTO esta en el modelo y el agente no:
+            // `px json` filtra por entorno, asi que un proyecto ausente puede
+            // estar simplemente en el otro entorno — eso no es orfandad.
+            if let pj = m.projects.first(where: { $0.name == t.project.name }) {
+                t.button.setOrphan(!pj.agents.contains { $0.name == t.agent.name })
+            }
             tabBar.addArrangedSubview(t.button)
         }
         let ocultas = tabs.filter { !visibles.contains($0.project.name) }.count

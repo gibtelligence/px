@@ -172,9 +172,14 @@ final class TabButton: NSView {
     private let closeBtn = NSTextField(labelWithString: "×")
     private let color: NSColor
     private var active = false
+    private var orphan = false
+    private let agentName: String
+    private let baseTip: String
 
     init(project: Project, agent: Agent) {
         color = project.nsColor
+        agentName = agent.name
+        baseTip = "\(project.name) / \(agent.name)\n\(agent.path)"
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = 6
@@ -193,8 +198,7 @@ final class TabButton: NSView {
             v.translatesAutoresizingMaskIntoConstraints = false
             addSubview(v)
         }
-        let tip = "\(project.name) / \(agent.name)\n\(agent.path)"
-        toolTip = tip
+        toolTip = baseTip
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: 28),
             label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
@@ -209,9 +213,32 @@ final class TabButton: NSView {
 
     func setActive(_ on: Bool) {
         active = on
-        bg.backgroundColor = (on ? Theme.terminalBG : NSColor.clear).cgColor
-        label.textColor = on ? Theme.fg : Theme.fg.withAlphaComponent(0.6)
-        accent.isHidden = !on
+        refresh()
+    }
+
+    /// Huerfana: su agente ya no esta en el reparto (p.ej. renombrado en el
+    /// .px.conf mientras la pestana seguia abierta — paso con raiz→finanzas).
+    /// No se cierra sola: cerrar es del usuario, y la sesion de tmux puede
+    /// seguir viva. Pero tiene que cantar — un nombre viejo con pinta de vivo
+    /// se confunde con un agente real.
+    func setOrphan(_ on: Bool) {
+        guard on != orphan else { return }
+        orphan = on
+        label.stringValue = on ? agentName + " ⚠" : agentName
+        toolTip = on
+            ? "huerfana: '\(agentName)' ya no esta en el reparto del proyecto\n"
+              + "(¿renombrado en el .px.conf?). Su sesion de tmux puede seguir\n"
+              + "viva; cierra la pestana y, si sobra, la sesion."
+            : baseTip
+        refresh()
+    }
+
+    private func refresh() {
+        bg.backgroundColor = (active ? Theme.terminalBG : NSColor.clear).cgColor
+        label.textColor = orphan ? Theme.amber
+                        : (active ? Theme.fg : Theme.fg.withAlphaComponent(0.6))
+        accent.backgroundColor = (orphan ? Theme.amber : color).cgColor
+        accent.isHidden = !(active || orphan)
         needsLayout = true
     }
 
