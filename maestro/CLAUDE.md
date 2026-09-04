@@ -36,6 +36,9 @@ Tu carpeta es el repo del utillaje: `/Volumes/PERSONAL/Proyectos/_px`
    - `px ls` → el proyecto y sus agentes salen con las rutas correctas.
    - `px json` → parsea (es lo que consume la app).
    - Abre una pestaña en PX y comprueba que arranca en el cwd correcto.
+   - Con la pestaña abierta, `px sessions` → proyecto y agente salen con sus
+     nombres EXACTOS también en el registro anticorte (un proyecto con guion
+     los descuadró una vez — e4bd79e — y nadie lo vio hasta usarlo).
 7. **Commit** en este repo si tocaste el utillaje; el `.px.conf` y los briefs
    van al repo **del proyecto**, no a este.
 
